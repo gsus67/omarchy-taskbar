@@ -29,7 +29,8 @@ abiertas, siempre centradas.
 
 ## Ligera
 
-No instala nada ni pide sudo. Solo usa lo que Omarchy ya trae: la lista de
+No instala nada ni necesita permisos de administrador. Solo usa lo que Omarchy
+ya trae: la lista de
 ventanas, los accesos de aplicaciones y el tema de iconos de Quickshell, los
 valores del tema de Omarchy, `omarchy bar transparent` y `uwsm-app` para abrir
 apps. Reacciona a eventos (ventanas que se abren o cierran, cambios de archivo)

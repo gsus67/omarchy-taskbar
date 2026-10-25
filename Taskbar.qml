@@ -266,7 +266,14 @@ Item {
     readonly property var windows: root.windowsFor(app.key)
     readonly property bool running: windows.length > 0
     readonly property bool focused: windows.some(function(toplevel) { return toplevel.activated })
-    readonly property string label: app.entry ? app.entry.name : app.appId
+    // App name; a window without a desktop entry uses its own title.
+    // Several windows: "Name (3)".
+    readonly property string label: {
+      var name = app.entry ? app.entry.name : ""
+      if (name === "" && windows.length > 0) name = windows[0].title || ""
+      if (name === "") name = app.appId
+      return windows.length > 1 ? name + " (" + windows.length + ")" : name
+    }
 
     width: root.barSize + Style.space(8)
     height: root.barSize
@@ -317,9 +324,41 @@ Item {
       }
     }
 
-    PanelToolTip {
-      visible: mouse.containsMouse && !menu.visible
-      text: button.label
+    // Its own popup above the icon: a tooltip inside the bar window would be
+    // clipped to the bar's height.
+    Timer {
+      id: tipDelay
+      interval: 400
+      running: mouse.containsMouse && !menu.visible
+    }
+
+    PopupWindow {
+      id: tip
+      visible: mouse.containsMouse && !menu.visible && !tipDelay.running
+      anchor.item: button
+      anchor.edges: Edges.Top
+      anchor.gravity: Edges.Top
+      anchor.margins.top: -Style.space(6)
+      implicitWidth: tipLabel.implicitWidth + Style.space(16)
+      implicitHeight: tipLabel.implicitHeight + Style.space(10)
+      color: "transparent"
+
+      BorderSurface {
+        anchors.fill: parent
+        color: Commons.Color.tooltip.background
+        borderSpec: Border.surfaceSpec("tooltip", "border", Commons.Color.tooltip.border, Style.normalBorderWidth)
+        radius: Style.cornerRadius
+
+        Text {
+          id: tipLabel
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: button.label
+          color: Commons.Color.tooltip.text
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
     }
 
     PopupWindow {

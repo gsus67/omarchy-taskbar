@@ -31,6 +31,21 @@ Item {
   property var pinned: []
   property bool transparent: false
 
+  // The one right-click menu open, if any. Opening another or clicking the
+  // bar closes it.
+  property var openMenu: null
+
+  function showMenu(menu) {
+    if (root.openMenu && root.openMenu !== menu) root.openMenu.visible = false
+    root.openMenu = menu
+    menu.visible = true
+  }
+
+  function closeMenu() {
+    if (root.openMenu) root.openMenu.visible = false
+    root.openMenu = null
+  }
+
   // ------------------------------------------------------------ transparency
 
   // Same switch as Omarchy's bar: `bar.transparent` in shell.json. Watching
@@ -237,8 +252,11 @@ Item {
         // Empty bar space: double-click toggles transparency, like Omarchy's bar.
         MouseArea {
           anchors.fill: parent
-          acceptedButtons: Qt.LeftButton
-          onDoubleClicked: root.toggleTransparent()
+          acceptedButtons: Qt.LeftButton | Qt.RightButton
+          onPressed: root.closeMenu()
+          onDoubleClicked: function(event) {
+            if (event.button === Qt.LeftButton) root.toggleTransparent()
+          }
         }
 
         Row {
@@ -318,9 +336,14 @@ Item {
       hoverEnabled: true
       acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
       onClicked: function(event) {
+        if (event.button === Qt.RightButton) {
+          if (menu.visible) root.closeMenu()
+          else root.showMenu(menu)
+          return
+        }
+        root.closeMenu()
         if (event.button === Qt.LeftButton) root.activate(button.app)
-        else if (event.button === Qt.MiddleButton) root.launch(button.app)
-        else menu.visible = true
+        else root.launch(button.app)
       }
     }
 
@@ -374,6 +397,8 @@ Item {
 
       Rectangle {
         anchors.fill: parent
+        focus: true
+        Keys.onEscapePressed: root.closeMenu()
         color: Commons.Color.menu.background
         border.color: Commons.Color.menu.border
         border.width: Style.normalBorderWidth
@@ -386,25 +411,33 @@ Item {
           MenuRow {
             text: root.isPinned(button.app.key) ? root.t("Unpin", "Desanclar") : root.t("Pin", "Anclar")
             shown: !!button.app.entry
-            onTriggered: { menu.visible = false; root.togglePin(button.app.key) }
+            onTriggered: { root.closeMenu(); root.togglePin(button.app.key) }
           }
           MenuRow {
             text: root.t("New window", "Nueva ventana")
             shown: !!button.app.entry
-            onTriggered: { menu.visible = false; root.launch(button.app) }
+            onTriggered: { root.closeMenu(); root.launch(button.app) }
           }
           MenuRow {
             text: button.windows.length > 1 ? root.t("Close all", "Cerrar todas") : root.t("Close", "Cerrar")
             shown: button.running
-            onTriggered: { menu.visible = false; root.closeAll(button.app) }
+            onTriggered: { root.closeMenu(); root.closeAll(button.app) }
           }
         }
       }
 
+      // Outside-click dismissal, as in Omarchy's PopupCard: while the grab is
+      // active input only reaches the menu and the bar; a click anywhere else
+      // clears it. Armed once the menu is mapped, or Hyprland ignores it.
+      onVisibleChanged: {
+        if (visible) Qt.callLater(function() { grab.active = menu.visible })
+        else grab.active = false
+      }
+
       HyprlandFocusGrab {
-        windows: [menu]
-        active: menu.visible
-        onCleared: menu.visible = false
+        id: grab
+        windows: [menu, button.QsWindow.window]
+        onCleared: if (root.openMenu === menu) root.closeMenu()
       }
     }
   }

@@ -74,12 +74,13 @@ Item {
     }
   }
 
-  // First run: pin the default browser, file manager and terminal.
+  // First run: pin the default browser (the real one behind Omarchy's
+  // launcher), file manager and terminal.
   Process {
     id: seedProc
     command: ["bash", "-c",
       'term=$(grep -v "^#" "${XDG_CONFIG_HOME:-$HOME/.config}/xdg-terminals.list" 2>/dev/null | head -n1); '
-      + 'printf "%s\\n" "$(xdg-settings get default-web-browser 2>/dev/null)" '
+      + 'printf "%s\\n" "$(omarchy-cmd-default-browser 2>/dev/null)" '
       + '"$(xdg-mime query default inode/directory 2>/dev/null)" "$term"']
     stdout: StdioCollector {
       onStreamFinished: {
@@ -169,8 +170,45 @@ Item {
   }
 
   function iconFor(app) {
-    var name = app.entry && app.entry.icon ? app.entry.icon : app.appId.toLowerCase()
-    return Quickshell.iconPath(name, true) || Quickshell.iconPath("application-x-executable", true)
+    var name = app.entry && app.entry.icon ? app.entry.icon : (root.fallbackIcons[app.appId] || app.appId.toLowerCase())
+    var path = Quickshell.iconPath(name, true)
+    if (path === "") Qt.callLater(root.lookupIcon, app.appId)
+    return path || Quickshell.iconPath("application-x-executable", true)
+  }
+
+  // A window whose class has no desktop entry (e.g. `alacritty --class=x`)
+  // borrows the icon of the program behind it. Asked once per class.
+  property var fallbackIcons: ({})
+  property var iconQueue: []
+
+  function lookupIcon(appId) {
+    if (appId === "" || appId in root.fallbackIcons || root.iconQueue.indexOf(appId) !== -1) return
+    root.iconQueue = root.iconQueue.concat([appId])
+    if (!iconProc.running) nextIcon()
+  }
+
+  function nextIcon() {
+    if (root.iconQueue.length === 0) return
+    iconProc.appId = root.iconQueue[0]
+    root.iconQueue = root.iconQueue.slice(1)
+    iconProc.running = true
+  }
+
+  Process {
+    id: iconProc
+    property string appId: ""
+    command: ["bash", "-c",
+      'pid=$(hyprctl clients -j | jq -r --arg c "$1" \'first(.[] | select(.class == $c) | .pid) // empty\'); '
+      + '[[ -n $pid ]] && cat "/proc/$pid/comm"', "omarchy-taskbar", appId]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var entry = root.entryFor(text.trim())
+        var icons = Object.assign({}, root.fallbackIcons)
+        icons[iconProc.appId] = entry && entry.icon ? entry.icon : ""
+        root.fallbackIcons = icons
+      }
+    }
+    onExited: root.nextIcon()
   }
 
   // ------------------------------------------------------------ the bar

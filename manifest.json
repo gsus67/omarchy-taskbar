@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.gsus67.omarchy-taskbar",
+  "name": "Omarchy Taskbar",
+  "version": "0.0.1",
+  "author": "Omarchy Taskbar contributors",
+  "license": "MIT",
+  "description": "A clean full-width bottom taskbar that follows your Omarchy theme: pinned apps to launch fast and every open app, centered, with a mark under the ones that are running.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Taskbar.qml"
+  }
+}

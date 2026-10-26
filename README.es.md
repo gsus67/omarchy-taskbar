@@ -22,6 +22,10 @@ de Omarchy:
 
 ![Pantalla completa con la barra transparente](assets/screen-transparent.png)
 
+Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10: un clic muestra cada una con su escritorio, y al elegir una te lleva a ella.
+
+![Miniaturas de las ventanas con su escritorio](assets/window-previews.png)
+
 ## Funciones
 
 - Una barra en el borde inferior de cada pantalla; las ventanas le dejan sitio.

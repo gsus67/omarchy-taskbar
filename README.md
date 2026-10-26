@@ -21,6 +21,11 @@ bar:
 
 ![Full screen with the transparent bar](assets/screen-transparent.png)
 
+An app with several windows, here three terminals on workspaces 8, 9 and 10:
+a click shows each one with its workspace, and picking one jumps there.
+
+![Window previews with their workspace](assets/window-previews.png)
+
 ## Features
 
 - One bar along the bottom edge of every screen; windows make room for it.

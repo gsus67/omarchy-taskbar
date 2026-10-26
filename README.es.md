@@ -38,6 +38,7 @@ Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10:
 - **Clic central**: ventana nueva.
 - **Varias ventanas de una app**: un clic muestra una miniatura de cada una con su escritorio (una sola captura, solo mientras la lista está abierta); eliges una y la barra te lleva a ella, aunque esté en otro escritorio.
 - **Clic derecho**: anclar/desanclar, ventana nueva, cerrar. Ventana nueva funciona con todas las apps, también con ventanas sin entrada de escritorio (como una terminal abierta con su propia clase).
+- **El icono correcto en apps que van detrás de otro programa**: las que corren dentro de una terminal (cliamp, Voxtype, las TUI de Docker y monitores de Omarchy) y las ventanas que abre un script (la ventana FreeRDP de la máquina virtual de Windows) muestran su propio icono. Solo se leen nombres de procesos, nunca líneas de órdenes.
 - **Aplicaciones web** (las de `omarchy-webapp-install`): muestran su propio icono, tienen su propio botón y se pueden anclar, en vez de salir como el navegador.
 - **Doble clic en una zona vacía**: activa o quita la transparencia, igual que
   la barra de Omarchy. Las dos barras comparten el mismo ajuste

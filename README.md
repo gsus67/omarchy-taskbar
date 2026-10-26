@@ -41,6 +41,10 @@ a click shows each one with its workspace, and picking one jumps there.
 - **Right click**: pin/unpin, new window, close. New window works for every
   app, also windows without a desktop entry (such as a terminal started with
   its own class).
+- **The right icon for apps behind other programs**: apps running inside a
+  terminal (cliamp, Voxtype, Omarchy's Docker and monitor TUIs) and windows
+  opened by a script (the Windows VM's FreeRDP window) show the app's own icon.
+  Only process names are read, never command lines.
 - **Web apps** (Omarchy's `omarchy-webapp-install`) show their own icon, get
   their own button and can be pinned, instead of appearing as the browser.
 - **Double click on empty bar space**: toggle transparency, exactly like

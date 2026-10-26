@@ -19,7 +19,11 @@ them fast and shows every open app, all centered.
 - **Left click**: open the app, or focus it; if it is already focused and has
   several windows, step to the next one.
 - **Middle click**: new window.
-- **Right click**: pin/unpin, new window, close.
+- **Right click**: pin/unpin, new window, close. New window works for every
+  app, also windows without a desktop entry (such as a terminal started with
+  its own class).
+- **Web apps** (Omarchy's `omarchy-webapp-install`) show their own icon, get
+  their own button and can be pinned, instead of appearing as the browser.
 - **Double click on empty bar space**: toggle transparency, exactly like
   Omarchy's bar. Both bars share the same setting (`bar.transparent` in
   `shell.json`), so double-clicking either one changes both.

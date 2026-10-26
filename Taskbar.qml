@@ -185,11 +185,19 @@ Item {
   // From the desktop entry; for a window without one (e.g. a terminal started
   // with its own class), the entry or program found behind its process.
   function launch(app) {
-    if (app.entry) { Quickshell.execDetached(["uwsm-app", "--", app.entry.id + ".desktop"]); return }
+    if (app.entry) { launchEntry(app.entry); return }
     var found = root.fallbacks[app.appId]
     if (!found) return
-    if (found.entry !== "") Quickshell.execDetached(["uwsm-app", "--", found.entry + ".desktop"])
+    if (found.entry !== "") launchEntry(DesktopEntries.byId(found.entry))
     else if (found.exe !== "") Quickshell.execDetached(["uwsm-app", "--", found.exe])
+  }
+
+  // uwsm-app rejects desktop ids that are not valid ids, such as web apps
+  // named "Google Maps.desktop"; those run the entry's own command instead.
+  function launchEntry(entry) {
+    if (!entry) return
+    if (/^[A-Za-z0-9._-]+$/.test(entry.id)) Quickshell.execDetached(["uwsm-app", "--", entry.id + ".desktop"])
+    else if (entry.command && entry.command.length > 0) Quickshell.execDetached(["uwsm-app", "--"].concat(entry.command))
   }
 
   function canLaunch(app) {

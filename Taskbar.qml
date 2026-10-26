@@ -490,13 +490,18 @@ Item {
           anchors.centerIn: parent
 
           Repeater {
-            model: windowList.visible ? button.windows : []
+            model: button.windows
             delegate: WindowRow {
               required property var modelData
               title: modelData.title || button.label
-              workspace: root.workspaceOf(modelData)
+              workspace: windowList.visible ? root.workspaceOf(modelData) : ""
               current: modelData.activated
-              onTriggered: { root.closeMenu(); root.focusWindow(modelData) }
+              // Jump first: closing the list can tear the row down.
+              onTriggered: {
+                var target = modelData
+                root.focusWindow(target)
+                root.closeMenu()
+              }
             }
           }
         }

@@ -152,9 +152,24 @@ Item {
     return webAppEntry(appId) || DesktopEntries.heuristicLookup(appId)
   }
 
+  // A window's own entry, or the one of the program behind it (found later
+  // through its process), so e.g. a terminal with its own class joins the
+  // terminal's button and can be pinned like it.
+  function windowEntry(appId) {
+    var entry = entryFor(appId)
+    if (entry) return entry
+    var found = root.fallbacks[appId]
+    return found && found.entry !== "" ? DesktopEntries.byId(found.entry) : null
+  }
+
+  // The button a window belongs to: its entry id, else the program's path,
+  // else its class. Pinned keys are the same ids or paths.
   function keyFor(toplevel) {
-    var entry = entryFor(toplevel.appId)
-    return entry ? entry.id : String(toplevel.appId || "")
+    var appId = String(toplevel.appId || "")
+    var entry = windowEntry(appId)
+    if (entry) return entry.id
+    var found = root.fallbacks[appId]
+    return found && found.exe !== "" ? found.exe : appId
   }
 
   readonly property var apps: {
@@ -162,16 +177,25 @@ Item {
     var seen = ({})
     DesktopEntries.applications.values // re-evaluate when apps are installed
     root.pinned.forEach(function(id) {
+      // A pinned program without a desktop entry is kept as its path.
+      if (id.charAt(0) === "/") {
+        if (seen[id]) return
+        seen[id] = true
+        list.push({ key: id, entry: null, appId: "", exe: id })
+        return
+      }
       var entry = DesktopEntries.byId(id)
       if (!entry || seen[entry.id]) return
       seen[entry.id] = true
-      list.push({ key: entry.id, entry: entry, appId: "" })
+      list.push({ key: entry.id, entry: entry, appId: "", exe: "" })
     })
     ToplevelManager.toplevels.values.forEach(function(toplevel) {
       var key = root.keyFor(toplevel)
       if (key === "" || seen[key]) return
       seen[key] = true
-      list.push({ key: key, entry: root.entryFor(toplevel.appId), appId: String(toplevel.appId || "") })
+      var appId = String(toplevel.appId || "")
+      var found = root.fallbacks[appId]
+      list.push({ key: key, entry: root.windowEntry(appId), appId: appId, exe: found ? found.exe : "" })
     })
     return list
   }
@@ -186,6 +210,7 @@ Item {
   // with its own class), the entry or program found behind its process.
   function launch(app) {
     if (app.entry) { launchEntry(app.entry); return }
+    if (app.exe) { Quickshell.execDetached(["uwsm-app", "--", app.exe]); return }
     var found = root.fallbacks[app.appId]
     if (!found) return
     if (found.entry !== "") launchEntry(DesktopEntries.byId(found.entry))
@@ -202,8 +227,11 @@ Item {
 
   function canLaunch(app) {
     var found = root.fallbacks[app.appId]
-    return !!app.entry || !!(found && (found.entry !== "" || found.exe !== ""))
+    return !!app.entry || !!app.exe || !!(found && (found.entry !== "" || found.exe !== ""))
   }
+
+  // Anything the bar can start again can be pinned: an entry or a program path.
+  function canPin(app) { return !!app.entry || (app.key.charAt(0) === "/" && !!app.exe) }
 
   // Not running: start it. Running elsewhere: bring its window up. Already
   // focused with several windows: step to the next one.
@@ -226,8 +254,10 @@ Item {
 
   function iconFor(app) {
     var found = root.fallbacks[app.appId]
-    var name = app.entry && app.entry.icon ? app.entry.icon : (found && found.icon) || app.appId.toLowerCase()
-    if (!app.entry) Qt.callLater(root.lookupIcon, app.appId)
+    // A pinned program path: its file name ("/usr/bin/foot" → "foot").
+    var own = app.appId !== "" ? app.appId.toLowerCase() : String(app.exe || "").split("/").pop()
+    var name = app.entry && app.entry.icon ? app.entry.icon : (found && found.icon) || own
+    if (!app.entry && app.appId !== "") Qt.callLater(root.lookupIcon, app.appId)
     var path = Quickshell.iconPath(name, true)
     return path || Quickshell.iconPath("application-x-executable", true)
   }
@@ -339,7 +369,7 @@ Item {
     readonly property string label: {
       var name = app.entry ? app.entry.name : ""
       if (name === "" && windows.length > 0) name = windows[0].title || ""
-      if (name === "") name = app.appId
+      if (name === "") name = app.appId || String(app.exe || "").split("/").pop()
       return windows.length > 1 ? name + " (" + windows.length + ")" : name
     }
 
@@ -460,7 +490,7 @@ Item {
 
           MenuRow {
             text: root.isPinned(button.app.key) ? root.t("Unpin", "Desanclar") : root.t("Pin", "Anclar")
-            shown: !!button.app.entry
+            shown: root.canPin(button.app) || root.isPinned(button.app.key)
             onTriggered: { root.closeMenu(); root.togglePin(button.app.key) }
           }
           MenuRow {

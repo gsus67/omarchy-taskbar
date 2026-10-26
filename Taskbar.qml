@@ -457,6 +457,7 @@ Item {
 
     Text {
       id: rowLabel
+      textFormat: Text.PlainText
       anchors.verticalCenter: parent.verticalCenter
       anchors.left: parent.left
       anchors.leftMargin: Style.space(12)

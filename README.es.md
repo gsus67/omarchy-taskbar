@@ -32,6 +32,7 @@ de Omarchy:
 - **Clic izquierdo**: abre la app o la enfoca; si ya tiene el foco y varias
   ventanas, pasa a la siguiente.
 - **Clic central**: ventana nueva.
+- **Varias ventanas de una app**: un clic las lista con su escritorio; eliges una y la barra te lleva a ella, aunque esté en otro escritorio.
 - **Clic derecho**: anclar/desanclar, ventana nueva, cerrar. Ventana nueva funciona con todas las apps, también con ventanas sin entrada de escritorio (como una terminal abierta con su propia clase).
 - **Aplicaciones web** (las de `omarchy-webapp-install`): muestran su propio icono, tienen su propio botón y se pueden anclar, en vez de salir como el navegador.
 - **Doble clic en una zona vacía**: activa o quita la transparencia, igual que

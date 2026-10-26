@@ -248,6 +248,29 @@ Item {
     else if (windows.length > 1) windows[(current + 1) % windows.length].activate()
   }
 
+  // Hyprland's view of a window: its workspace and address.
+  function hyprlandOf(toplevel) {
+    var all = Hyprland.toplevels.values
+    for (var i = 0; i < all.length; i++) if (all[i].wayland === toplevel) return all[i]
+    return null
+  }
+
+  function workspaceOf(toplevel) {
+    var hypr = hyprlandOf(toplevel)
+    return hypr && hypr.workspace ? String(hypr.workspace.name) : ""
+  }
+
+  // Jumps to one window, switching to its workspace. The address comes from
+  // Hyprland and is checked to be hex before it goes into the dispatch.
+  function focusWindow(toplevel) {
+    var hypr = hyprlandOf(toplevel)
+    var address = hypr ? String(hypr.address) : ""
+    if (!/^0x/.test(address)) address = "0x" + address
+    if (/^0x[0-9a-fA-F]+$/.test(address))
+      Quickshell.execDetached(["hyprctl", "dispatch", 'hl.dsp.focus({ window = "address:' + address + '" })'])
+    else toplevel.activate()
+  }
+
   function closeAll(app) {
     windowsFor(app.key).forEach(function(toplevel) { toplevel.close() })
   }
@@ -421,6 +444,12 @@ Item {
           else root.showMenu(menu)
           return
         }
+        // Several windows: pick one from the list (it may be on another workspace).
+        if (event.button === Qt.LeftButton && button.windows.length > 1) {
+          if (windowList.visible) root.closeMenu()
+          else root.showMenu(windowList)
+          return
+        }
         root.closeMenu()
         if (event.button === Qt.LeftButton) root.activate(button.app)
         else root.launch(button.app)
@@ -432,12 +461,62 @@ Item {
     Timer {
       id: tipDelay
       interval: 400
-      running: mouse.containsMouse && !menu.visible
+      running: mouse.containsMouse && !menu.visible && !windowList.visible
+    }
+
+    // The app's windows, each with its workspace; a click jumps to it.
+    PopupWindow {
+      id: windowList
+      visible: false
+      anchor.item: button
+      anchor.edges: Edges.Top
+      anchor.gravity: Edges.Top
+      anchor.margins.top: -Style.space(4)
+      implicitWidth: windowColumn.implicitWidth + Style.space(8)
+      implicitHeight: windowColumn.implicitHeight + Style.space(8)
+      color: "transparent"
+
+      Rectangle {
+        anchors.fill: parent
+        focus: true
+        Keys.onEscapePressed: root.closeMenu()
+        color: Commons.Color.menu.background
+        border.color: Commons.Color.menu.border
+        border.width: Style.normalBorderWidth
+        radius: Style.cornerRadius
+
+        Column {
+          id: windowColumn
+          anchors.centerIn: parent
+
+          Repeater {
+            model: windowList.visible ? button.windows : []
+            delegate: WindowRow {
+              required property var modelData
+              title: modelData.title || button.label
+              workspace: root.workspaceOf(modelData)
+              current: modelData.activated
+              onTriggered: { root.closeMenu(); root.focusWindow(modelData) }
+            }
+          }
+        }
+      }
+
+      onVisibleChanged: {
+        if (visible) Qt.callLater(function() { listGrab.active = windowList.visible })
+        else listGrab.active = false
+      }
+
+      HyprlandFocusGrab {
+        id: listGrab
+        windows: [windowList, button.QsWindow.window]
+        onCleared: if (root.openMenu === windowList) root.closeMenu()
+      }
     }
 
     PopupWindow {
       id: tip
-      visible: mouse.containsMouse && !menu.visible && !tipDelay.running
+      visible: mouse.containsMouse && !menu.visible && !windowList.visible && !tipDelay.running
       anchor.item: button
       anchor.edges: Edges.Top
       anchor.gravity: Edges.Top
@@ -519,6 +598,55 @@ Item {
         windows: [menu, button.QsWindow.window]
         onCleared: if (root.openMenu === menu) root.closeMenu()
       }
+    }
+  }
+
+  // A row of the window list: title on the left, workspace on the right.
+  component WindowRow: Rectangle {
+    id: windowRow
+
+    property string title
+    property string workspace
+    property bool current: false
+    signal triggered()
+
+    width: Math.min(Style.space(420), Math.max(Style.space(220), windowTitle.implicitWidth + windowSpace.implicitWidth + Style.space(40)))
+    height: windowTitle.implicitHeight + Style.space(12)
+    radius: Style.cornerRadius
+    color: windowMouse.containsMouse ? Commons.Color.menu.selectedBackground : "transparent"
+
+    Text {
+      id: windowTitle
+      textFormat: Text.PlainText
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      width: Math.min(implicitWidth, windowRow.width - windowSpace.implicitWidth - Style.space(36))
+      elide: Text.ElideRight
+      text: windowRow.title
+      font.bold: windowRow.current
+      color: windowMouse.containsMouse ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.body
+    }
+
+    Text {
+      id: windowSpace
+      textFormat: Text.PlainText
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(12)
+      text: windowRow.workspace === "" ? "" : root.t("Workspace ", "Escritorio ") + windowRow.workspace
+      color: windowMouse.containsMouse ? Commons.Color.menu.selectedText : Commons.Color.accent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    MouseArea {
+      id: windowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: windowRow.triggered()
     }
   }
 

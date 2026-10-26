@@ -172,7 +172,9 @@ Item {
     var map = ({})
     DesktopEntries.applications.values.forEach(function(entry) {
       var words = (entry.command || []).map(String)
-      while (words.length > 0 && (/^(uwsm|uwsm-app|app|--|setsid|env)$/.test(words[0].split("/").pop()) || /^[A-Za-z_]+=/.test(words[0])))
+      // Skip launchers, their options (env --unset=X) and VAR=value pairs.
+      while (words.length > 0 && (/^(uwsm|uwsm-app|app|--|setsid|env)$/.test(words[0].split("/").pop())
+                                  || /^[A-Za-z_]+=/.test(words[0]) || /^-/.test(words[0])))
         words.shift()
       if (words.length === 0) return
       var key = words[0].split("/").pop().slice(0, 15)

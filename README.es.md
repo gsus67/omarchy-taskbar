@@ -15,12 +15,16 @@ propio icono (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
 
 ![La barra, oscura](assets/bar-dark.png)
 
+![Pantalla completa con la barra oscura](assets/screen-dark-empty.png)
+
 Con doble clic en un espacio vacío se vuelve transparente, junto con la barra
 de Omarchy:
 
 ![La barra, transparente](assets/bar-transparent.png)
 
-![Pantalla completa con la barra transparente](assets/screen-transparent.png)
+![Pantalla completa con la barra transparente](assets/screen-transparent-empty.png)
+
+![Con ventanas abiertas y la barra transparente](assets/screen-transparent.png)
 
 Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10: un clic muestra cada una con su escritorio, y al elegir una te lleva a ella.
 

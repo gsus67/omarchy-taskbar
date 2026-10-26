@@ -14,12 +14,16 @@ icons (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
 
 ![The bar, dark](assets/bar-dark.png)
 
+![Full screen with the dark bar](assets/screen-dark-empty.png)
+
 Double-click empty space and it turns transparent, together with Omarchy's own
 bar:
 
 ![The bar, transparent](assets/bar-transparent.png)
 
-![Full screen with the transparent bar](assets/screen-transparent.png)
+![Full screen with the transparent bar](assets/screen-transparent-empty.png)
+
+![With windows open and the transparent bar](assets/screen-transparent.png)
 
 An app with several windows, here three terminals on workspaces 8, 9 and 10:
 a click shows each one with its workspace, and picking one jumps there.

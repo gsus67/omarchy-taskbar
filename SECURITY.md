@@ -8,4 +8,9 @@ Every change runs, in CI:
 
 - static QML checks: every text element renders plain text (window titles can
   come from any web page) and the QML references no remote URL;
-- CodeQL `security-extended` analysis of the workflows.
+- guards for the commands it runs: every `bash -c` script is made of string
+  literals only and receives window data as positional arguments, never pasted
+  into the script; other programs start from argument lists, without a shell;
+- ShellCheck on each embedded `bash -c` script;
+- CodeQL `security-extended` analysis and zizmor for the workflows;
+- OpenSSF Scorecard (weekly and on `main`) for the repository's practices.

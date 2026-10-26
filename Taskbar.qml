@@ -485,14 +485,19 @@ Item {
         border.width: Style.normalBorderWidth
         radius: Style.cornerRadius
 
-        Column {
+        // Side by side, like other taskbars' window previews.
+        Row {
           id: windowColumn
           anchors.centerIn: parent
+          spacing: Style.space(2)
 
           Repeater {
             model: button.windows
             delegate: WindowRow {
               required property var modelData
+              toplevel: modelData
+              capture: windowList.visible
+              icon: root.iconFor(button.app)
               title: modelData.title || button.label
               workspace: windowList.visible ? root.workspaceOf(modelData) : ""
               current: modelData.activated
@@ -606,24 +611,71 @@ Item {
     }
   }
 
-  // A row of the window list: title on the left, workspace on the right.
+  // A row of the window list: a thumbnail, then the title on the left and the
+  // workspace on the right. The thumbnail is one frame taken while the list
+  // is open (not live, never stored); without one the app icon stands in.
   component WindowRow: Rectangle {
     id: windowRow
 
+    property var toplevel
+    property bool capture: false
+    property string icon
     property string title
     property string workspace
     property bool current: false
     signal triggered()
 
-    width: Math.min(Style.space(420), Math.max(Style.space(220), windowTitle.implicitWidth + windowSpace.implicitWidth + Style.space(40)))
-    height: windowTitle.implicitHeight + Style.space(12)
+    readonly property int thumbWidth: Style.space(220)
+    readonly property int thumbHeight: Math.round(thumbWidth * 9 / 16)
+
+    width: thumbWidth + Style.space(24)
+    height: thumbHeight + windowTitle.implicitHeight + Style.space(24)
     radius: Style.cornerRadius
     color: windowMouse.containsMouse ? Commons.Color.menu.selectedBackground : "transparent"
+
+    Rectangle {
+      id: thumbFrame
+      anchors.top: parent.top
+      anchors.topMargin: Style.space(8)
+      anchors.horizontalCenter: parent.horizontalCenter
+      width: windowRow.thumbWidth
+      height: windowRow.thumbHeight
+      radius: Style.cornerRadius
+      color: Qt.rgba(0, 0, 0, 0.25)
+      border.width: windowRow.current ? Style.normalBorderWidth : 0
+      border.color: Commons.Color.accent
+      clip: true
+
+      Loader {
+        id: thumbLoader
+        anchors.fill: parent
+        anchors.margins: Style.space(2)
+        active: windowRow.capture && !!windowRow.toplevel
+        sourceComponent: ScreencopyView {
+          captureSource: windowRow.toplevel
+          live: false
+          paintCursor: false
+          constraintSize: Qt.size(thumbLoader.width, thumbLoader.height)
+        }
+      }
+
+      Image {
+        anchors.centerIn: parent
+        width: windowRow.thumbHeight / 2
+        height: width
+        visible: !(thumbLoader.item && thumbLoader.item.hasContent)
+        source: windowRow.icon
+        sourceSize.width: width * 2
+        sourceSize.height: height * 2
+        fillMode: Image.PreserveAspectFit
+      }
+    }
 
     Text {
       id: windowTitle
       textFormat: Text.PlainText
-      anchors.verticalCenter: parent.verticalCenter
+      anchors.top: thumbFrame.bottom
+      anchors.topMargin: Style.space(6)
       anchors.left: parent.left
       anchors.leftMargin: Style.space(12)
       width: Math.min(implicitWidth, windowRow.width - windowSpace.implicitWidth - Style.space(36))
@@ -638,7 +690,7 @@ Item {
     Text {
       id: windowSpace
       textFormat: Text.PlainText
-      anchors.verticalCenter: parent.verticalCenter
+      anchors.verticalCenter: windowTitle.verticalCenter
       anchors.right: parent.right
       anchors.rightMargin: Style.space(12)
       text: windowRow.workspace === "" ? "" : root.t("Workspace ", "Escritorio ") + windowRow.workspace

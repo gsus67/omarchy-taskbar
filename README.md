@@ -31,8 +31,8 @@ bar:
 - **Left click**: open the app, or focus it; if it is already focused and has
   several windows, step to the next one.
 - **Middle click**: new window.
-- **Several windows of one app**: a click lists them with their workspace; pick
-  one and the bar takes you there, even on another workspace.
+- **Several windows of one app**: a click shows a thumbnail of each with its
+  workspace (one frame, taken only while the list is open); pick one and the bar takes you there, even on another workspace.
 - **Right click**: pin/unpin, new window, close. New window works for every
   app, also windows without a desktop entry (such as a terminal started with
   its own class).

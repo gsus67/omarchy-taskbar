@@ -46,5 +46,12 @@ class ShellCommandTest(unittest.TestCase):
         self.assertLess(dispatch - guard, 200, "the address check must sit right before the dispatch")
 
 
+    def test_never_reads_command_lines(self):
+        # Command lines can hold secrets (passwords passed to xfreerdp, tokens);
+        # only process names and executable paths may be read.
+        self.assertNotIn("/cmdline", SOURCE)
+        self.assertNotIn("/environ", SOURCE)
+
+
 if __name__ == "__main__":
     unittest.main()

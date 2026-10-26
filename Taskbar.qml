@@ -142,9 +142,114 @@ Item {
     return map
   }
 
+  // Omarchy's own web app handlers (omarchy-webapp-handler-hey, -zoom…) keep
+  // the URL in the script: their name is matched against the host's labels.
+  readonly property var webHandlers: {
+    var map = ({})
+    DesktopEntries.applications.values.forEach(function(entry) {
+      var first = String((entry.command || [])[0] || "").split("/").pop()
+      if (first.indexOf("omarchy-webapp-handler-") === 0) map[first.slice(23).toLowerCase()] = entry
+    })
+    return map
+  }
+
   function webAppEntry(appId) {
     var match = /^(?:chrome|chromium|brave|msedge|vivaldi)-(.+?)__/.exec(appId)
-    return match ? (root.webApps[match[1].toLowerCase()] || null) : null
+    if (!match) return null
+    var host = match[1].toLowerCase()
+    if (root.webApps[host]) return root.webApps[host]
+    var labels = host.split(".")
+    for (var i = 0; i < labels.length; i++)
+      if (labels[i].length >= 3 && root.webHandlers[labels[i]]) return root.webHandlers[labels[i]]
+    return null
+  }
+
+  // Desktop entries by the program they run (first word of Exec after
+  // launchers like uwsm/setsid/env), cut to 15 characters like a process name.
+  // Used to find the entry of a script that opened a window under another
+  // program (e.g. omarchy-windows-vm opening xfreerdp).
+  readonly property var programs: {
+    var map = ({})
+    DesktopEntries.applications.values.forEach(function(entry) {
+      var words = (entry.command || []).map(String)
+      while (words.length > 0 && (/^(uwsm|uwsm-app|app|--|setsid|env)$/.test(words[0].split("/").pop()) || /^[A-Za-z_]+=/.test(words[0])))
+        words.shift()
+      if (words.length === 0) return
+      var key = words[0].split("/").pop().slice(0, 15)
+      if (key !== "" && !(key in map)) map[key] = entry
+    })
+    return map
+  }
+
+  // Entries that open a program inside a terminal ("-e prog" or
+  // "-e bash -c 'prog …'"), by that program, plus their names and icons,
+  // to recognise Omarchy's TUI windows (class TUI.tile/TUI.float) by what
+  // runs inside them.
+  readonly property var terminalApps: {
+    var list = []
+    DesktopEntries.applications.values.forEach(function(entry) {
+      var words = (entry.command || []).map(String)
+      var at = words.indexOf("-e")
+      if (at === -1 || at + 1 >= words.length) return
+      var program = words[at + 1].split("/").pop()
+      if (/^(ba)?sh$/.test(program) && words[at + 2] === "-c" && words[at + 3])
+        program = words[at + 3].trim().split(/\s+/)[0].split("/").pop()
+      list.push({ entry: entry, program: program.slice(0, 15),
+                  hints: [String(entry.icon || "").toLowerCase(), String(entry.name || "").toLowerCase().replace(/\s+/g, "")]
+                           .filter(function(hint) { return hint.length >= 4 }) })
+    })
+    return list
+  }
+
+  function isTerminal(entry) {
+    return !!entry && (entry.categories || []).map(String).indexOf("TerminalEmulator") !== -1
+  }
+
+  // Shells and multiplexers inside a terminal: still just a terminal.
+  readonly property var shellNames: /^((ba|z|da)?sh|fish|nu|tmux|zellij|screen|ssh|sudo|login|env)$/
+
+  // The app running inside a terminal window, from one process name: a
+  // terminal app ("-e prog"), an entry that runs it (e.g. cliamp), or an entry
+  // whose program or name contains it (e.g. voxtype → voxtype-configure).
+  function appInside(processName) {
+    if (processName === "" || root.shellNames.test(processName)) return null
+    var entry = terminalAppFor(processName)
+    if (entry) return entry
+    entry = root.programs[processName]
+    if (entry && !isTerminal(entry)) return entry
+    if (processName.length < 4) return null
+    var all = DesktopEntries.applications.values
+    for (var i = 0; i < all.length; i++) {
+      if (isTerminal(all[i])) continue
+      var words = (all[i].command || []).map(String)
+      var program = String(words[0] || "").split("/").pop().toLowerCase()
+      var name = String(all[i].name || "").toLowerCase().replace(/\s+/g, "")
+      if (program.indexOf(processName) === 0 || name.indexOf(processName) === 0) return all[i]
+    }
+    return null
+  }
+
+  // The terminal app whose program is (or whose name/icon appears in) a
+  // process name running inside the window.
+  function terminalAppFor(processName) {
+    var name = processName.toLowerCase()
+    for (var i = 0; i < root.terminalApps.length; i++)
+      if (root.terminalApps[i].program === processName) return root.terminalApps[i].entry
+    for (var j = 0; j < root.terminalApps.length; j++)
+      if (root.terminalApps[j].hints.some(function(hint) { return name.indexOf(hint) !== -1 })) return root.terminalApps[j].entry
+    return null
+  }
+
+  // How a window is looked up: by class, except Omarchy's TUI windows, which
+  // share a class and are told apart one by one (by Hyprland address).
+  function lookupFor(toplevel) {
+    var appId = String(toplevel.appId || "")
+    // Terminals too: each window may be running a different app.
+    if (appId.indexOf("TUI.") !== 0 && !isTerminal(entryFor(appId))) return appId
+    var hypr = hyprlandOf(toplevel)
+    var address = hypr ? String(hypr.address) : ""
+    if (address !== "" && !/^0x/.test(address)) address = "0x" + address
+    return /^0x[0-9a-fA-F]+$/.test(address) ? "@" + address : appId
   }
 
   function entryFor(appId) {
@@ -155,10 +260,12 @@ Item {
   // A window's own entry, or the one of the program behind it (found later
   // through its process), so e.g. a terminal with its own class joins the
   // terminal's button and can be pinned like it.
-  function windowEntry(appId) {
-    var entry = entryFor(appId)
+  function windowEntry(appId, lookup) {
+    var entry = lookup.charAt(0) === "@" ? null : entryFor(appId)
     if (entry) return entry
-    var found = root.fallbacks[appId]
+    var found = root.fallbacks[lookup]
+    // A terminal window with nothing but a shell inside stays the terminal.
+    if (lookup.charAt(0) === "@" && !(found && found.entry !== "")) return entryFor(appId)
     return found && found.entry !== "" ? DesktopEntries.byId(found.entry) : null
   }
 
@@ -166,10 +273,11 @@ Item {
   // else its class. Pinned keys are the same ids or paths.
   function keyFor(toplevel) {
     var appId = String(toplevel.appId || "")
-    var entry = windowEntry(appId)
+    var lookup = lookupFor(toplevel)
+    var entry = windowEntry(appId, lookup)
     if (entry) return entry.id
-    var found = root.fallbacks[appId]
-    return found && found.exe !== "" ? found.exe : appId
+    var found = root.fallbacks[lookup]
+    return found && found.exe !== "" && lookup.charAt(0) !== "@" ? found.exe : lookup
   }
 
   readonly property var apps: {
@@ -181,21 +289,25 @@ Item {
       if (id.charAt(0) === "/") {
         if (seen[id]) return
         seen[id] = true
-        list.push({ key: id, entry: null, appId: "", exe: id })
+        list.push({ key: id, entry: null, appId: "", lookup: "", exe: id })
         return
       }
       var entry = DesktopEntries.byId(id)
       if (!entry || seen[entry.id]) return
       seen[entry.id] = true
-      list.push({ key: entry.id, entry: entry, appId: "", exe: "" })
+      list.push({ key: entry.id, entry: entry, appId: "", lookup: "", exe: "" })
     })
     ToplevelManager.toplevels.values.forEach(function(toplevel) {
+      var appId = String(toplevel.appId || "")
+      var lookup = root.lookupFor(toplevel)
+      var found = root.fallbacks[lookup]
+      // Every terminal window is asked once what runs inside it, even when it
+      // is grouped under the terminal's button for now.
+      if (lookup.charAt(0) === "@" && !found) Qt.callLater(root.lookupIcon, lookup)
       var key = root.keyFor(toplevel)
       if (key === "" || seen[key]) return
       seen[key] = true
-      var appId = String(toplevel.appId || "")
-      var found = root.fallbacks[appId]
-      list.push({ key: key, entry: root.windowEntry(appId), appId: appId, exe: found ? found.exe : "" })
+      list.push({ key: key, entry: root.windowEntry(appId, lookup), appId: appId, lookup: lookup, exe: found ? found.exe : "" })
     })
     return list
   }
@@ -211,7 +323,7 @@ Item {
   function launch(app) {
     if (app.entry) { launchEntry(app.entry); return }
     if (app.exe) { Quickshell.execDetached(["uwsm-app", "--", app.exe]); return }
-    var found = root.fallbacks[app.appId]
+    var found = root.fallbacks[app.lookup]
     if (!found) return
     if (found.entry !== "") launchEntry(DesktopEntries.byId(found.entry))
     else if (found.exe !== "") Quickshell.execDetached(["uwsm-app", "--", found.exe])
@@ -226,7 +338,7 @@ Item {
   }
 
   function canLaunch(app) {
-    var found = root.fallbacks[app.appId]
+    var found = root.fallbacks[app.lookup]
     return !!app.entry || !!app.exe || !!(found && (found.entry !== "" || found.exe !== ""))
   }
 
@@ -276,11 +388,11 @@ Item {
   }
 
   function iconFor(app) {
-    var found = root.fallbacks[app.appId]
+    var found = root.fallbacks[app.lookup]
     // A pinned program path: its file name ("/usr/bin/foot" → "foot").
     var own = app.appId !== "" ? app.appId.toLowerCase() : String(app.exe || "").split("/").pop()
     var name = app.entry && app.entry.icon ? app.entry.icon : (found && found.icon) || own
-    if (!app.entry && app.appId !== "") Qt.callLater(root.lookupIcon, app.appId)
+    if (!app.entry && app.lookup !== "") Qt.callLater(root.lookupIcon, app.lookup)
     var path = Quickshell.iconPath(name, true)
     return path || Quickshell.iconPath("application-x-executable", true)
   }
@@ -307,14 +419,37 @@ Item {
   Process {
     id: iconProc
     property string appId: ""
-    // Prints the program name, then its executable path.
+    // $1 is a class, or "@0x…" for one window by address. Prints the program
+    // name, its executable path, the names of up to four parent processes,
+    // "--", then the names of the processes running inside it (two levels).
+    // Only process names (comm) and the executable path are read: never a
+    // command line, which can hold secrets (e.g. the Windows VM password
+    // passed to xfreerdp).
     command: ["bash", "-c",
-      'pid=$(hyprctl clients -j | jq -r --arg c "$1" \'first(.[] | select(.class == $c) | .pid) // empty\'); '
-      + '[[ -n $pid ]] && cat "/proc/$pid/comm" && readlink -f "/proc/$pid/exe"', "omarchy-taskbar", appId]
+      'if [[ $1 == @* ]]; then f=\'.address == $c\'; c=${1#@}; else f=\'.class == $c\'; c=$1; fi; '
+      + 'pid=$(hyprctl clients -j | jq -r --arg c "$c" "first(.[] | select($f) | .pid) // empty"); '
+      + '[[ $pid =~ ^[0-9]+$ ]] || exit 0; cat "/proc/$pid/comm"; readlink -f "/proc/$pid/exe"; p=$pid; '
+      + 'for _ in 1 2 3 4; do p=$(sed "s/.*) //" "/proc/$p/stat" 2>/dev/null | cut -d" " -f2); '
+      + '[[ $p =~ ^[0-9]+$ && $p -gt 1 ]] || break; cat "/proc/$p/comm"; done; echo --; '
+      + 'for c in $(cat /proc/"$pid"/task/*/children 2>/dev/null); do cat "/proc/$c/comm"; '
+      + 'for g in $(cat /proc/"$c"/task/*/children 2>/dev/null); do cat "/proc/$g/comm"; done; done', "omarchy-taskbar", appId]
     stdout: StdioCollector {
       onStreamFinished: {
-        var lines = text.split("\n")
-        var entry = root.entryFor((lines[0] || "").trim())
+        var lines = text.split("\n").map(function(line) { return line.trim() })
+        var split = lines.indexOf("--")
+        var parents = lines.slice(2, split === -1 ? lines.length : split)
+        var children = split === -1 ? [] : lines.slice(split + 1).filter(function(line) { return line !== "" })
+        var own = lines[0] || ""
+        var entry = null
+        if (iconProc.appId.charAt(0) === "@") {
+          // A terminal window: the app is what runs inside it.
+          for (var c = 0; !entry && c < children.length; c++) entry = root.appInside(children[c])
+        } else {
+          entry = root.entryFor(own) || root.programs[own] || null
+          // Not found: the entry of a parent (the script that opened it).
+          for (var i = 0; !entry && i < parents.length; i++)
+            if (parents[i] in root.programs) entry = root.programs[parents[i]]
+        }
         var exe = (lines[1] || "").trim()
         var known = Object.assign({}, root.fallbacks)
         known[iconProc.appId] = {

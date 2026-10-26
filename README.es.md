@@ -10,6 +10,18 @@ abiertas, siempre centradas.
 
 ![Omarchy Taskbar](preview.png)
 
+La barra de cerca, con apps ancladas, apps abiertas y aplicaciones web con su
+propio icono (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
+
+![La barra, oscura](assets/bar-dark.png)
+
+Con doble clic en un espacio vacío se vuelve transparente, junto con la barra
+de Omarchy:
+
+![La barra, transparente](assets/bar-transparent.png)
+
+![Pantalla completa con la barra transparente](assets/screen-transparent.png)
+
 ## Funciones
 
 - Una barra en el borde inferior de cada pantalla; las ventanas le dejan sitio.

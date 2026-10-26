@@ -9,6 +9,18 @@ them fast and shows every open app, all centered.
 
 ![Omarchy Taskbar](preview.png)
 
+The bar up close, with pinned apps, open apps and web apps with their own
+icons (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
+
+![The bar, dark](assets/bar-dark.png)
+
+Double-click empty space and it turns transparent, together with Omarchy's own
+bar:
+
+![The bar, transparent](assets/bar-transparent.png)
+
+![Full screen with the transparent bar](assets/screen-transparent.png)
+
 ## Features
 
 - One bar along the bottom edge of every screen; windows make room for it.

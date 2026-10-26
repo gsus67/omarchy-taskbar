@@ -208,7 +208,8 @@ Item {
   }
 
   // Shells and multiplexers inside a terminal: still just a terminal.
-  readonly property var shellNames: /^((ba|z|da)?sh|fish|nu|tmux|zellij|screen|ssh|sudo|login|env)$/
+  // su(do)? covers su and its privileged-run cousin; nothing here runs them.
+  readonly property var shellNames: /^((ba|z|da)?sh|fish|nu|tmux|zellij|screen|ssh|su(do)?|doas|login|env)$/
 
   // The app running inside a terminal window, from one process name: a
   // terminal app ("-e prog"), an entry that runs it (e.g. cliamp), or an entry

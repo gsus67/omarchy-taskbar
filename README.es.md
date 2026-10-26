@@ -10,6 +10,22 @@ abiertas, siempre centradas.
 
 ![Omarchy Taskbar](preview.png)
 
+La barra de cerca, con apps ancladas, apps abiertas y aplicaciones web con su
+propio icono (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
+
+![La barra, oscura](assets/bar-dark.png)
+
+Con doble clic en un espacio vacío se vuelve transparente, junto con la barra
+de Omarchy:
+
+![La barra, transparente](assets/bar-transparent.png)
+
+![Pantalla completa con la barra transparente](assets/screen-transparent.png)
+
+Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10: un clic muestra cada una con su escritorio, y al elegir una te lleva a ella.
+
+![Miniaturas de las ventanas con su escritorio](assets/window-previews.png)
+
 ## Funciones
 
 - Una barra en el borde inferior de cada pantalla; las ventanas le dejan sitio.
@@ -20,7 +36,10 @@ abiertas, siempre centradas.
 - **Clic izquierdo**: abre la app o la enfoca; si ya tiene el foco y varias
   ventanas, pasa a la siguiente.
 - **Clic central**: ventana nueva.
-- **Clic derecho**: anclar/desanclar, ventana nueva, cerrar.
+- **Varias ventanas de una app**: un clic muestra una miniatura de cada una con su escritorio (una sola captura, solo mientras la lista está abierta); eliges una y la barra te lleva a ella, aunque esté en otro escritorio.
+- **Clic derecho**: anclar/desanclar, ventana nueva, cerrar. Ventana nueva funciona con todas las apps, también con ventanas sin entrada de escritorio (como una terminal abierta con su propia clase).
+- **El icono correcto en apps que van detrás de otro programa**: las que corren dentro de una terminal (cliamp, Voxtype, las TUI de Docker y monitores de Omarchy) y las ventanas que abre un script (la ventana FreeRDP de la máquina virtual de Windows) muestran su propio icono. Solo se leen nombres de procesos, nunca líneas de órdenes.
+- **Aplicaciones web** (las de `omarchy-webapp-install`): muestran su propio icono, tienen su propio botón y se pueden anclar, en vez de salir como el navegador.
 - **Doble clic en una zona vacía**: activa o quita la transparencia, igual que
   la barra de Omarchy. Las dos barras comparten el mismo ajuste
   (`bar.transparent` en `shell.json`), así que el doble clic en cualquiera

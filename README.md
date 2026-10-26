@@ -9,6 +9,23 @@ them fast and shows every open app, all centered.
 
 ![Omarchy Taskbar](preview.png)
 
+The bar up close, with pinned apps, open apps and web apps with their own
+icons (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
+
+![The bar, dark](assets/bar-dark.png)
+
+Double-click empty space and it turns transparent, together with Omarchy's own
+bar:
+
+![The bar, transparent](assets/bar-transparent.png)
+
+![Full screen with the transparent bar](assets/screen-transparent.png)
+
+An app with several windows, here three terminals on workspaces 8, 9 and 10:
+a click shows each one with its workspace, and picking one jumps there.
+
+![Window previews with their workspace](assets/window-previews.png)
+
 ## Features
 
 - One bar along the bottom edge of every screen; windows make room for it.
@@ -19,7 +36,17 @@ them fast and shows every open app, all centered.
 - **Left click**: open the app, or focus it; if it is already focused and has
   several windows, step to the next one.
 - **Middle click**: new window.
-- **Right click**: pin/unpin, new window, close.
+- **Several windows of one app**: a click shows a thumbnail of each with its
+  workspace (one frame, taken only while the list is open); pick one and the bar takes you there, even on another workspace.
+- **Right click**: pin/unpin, new window, close. New window works for every
+  app, also windows without a desktop entry (such as a terminal started with
+  its own class).
+- **The right icon for apps behind other programs**: apps running inside a
+  terminal (cliamp, Voxtype, Omarchy's Docker and monitor TUIs) and windows
+  opened by a script (the Windows VM's FreeRDP window) show the app's own icon.
+  Only process names are read, never command lines.
+- **Web apps** (Omarchy's `omarchy-webapp-install`) show their own icon, get
+  their own button and can be pinned, instead of appearing as the browser.
 - **Double click on empty bar space**: toggle transparency, exactly like
   Omarchy's bar. Both bars share the same setting (`bar.transparent` in
   `shell.json`), so double-clicking either one changes both.

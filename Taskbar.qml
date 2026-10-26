@@ -127,8 +127,29 @@ Item {
 
   // ------------------------------------------------------------ apps model
 
+  // Omarchy web apps run as Chromium --app windows named
+  // "chrome-<host>__<path>-<profile>"; the heuristic lookup would match the
+  // browser. Their desktop entries launch omarchy-launch-webapp (or --app=)
+  // with the URL, so the host links each window to its own entry and icon.
+  readonly property var webApps: {
+    var map = ({})
+    DesktopEntries.applications.values.forEach(function(entry) {
+      var exec = String(entry.execString || "")
+      if (exec.indexOf("omarchy-launch-webapp") === -1 && exec.indexOf("--app=") === -1) return
+      var match = /https?:\/\/([^\/\s"':]+)/.exec(exec)
+      if (match && !(match[1].toLowerCase() in map)) map[match[1].toLowerCase()] = entry
+    })
+    return map
+  }
+
+  function webAppEntry(appId) {
+    var match = /^(?:chrome|chromium|brave|msedge|vivaldi)-(.+?)__/.exec(appId)
+    return match ? (root.webApps[match[1].toLowerCase()] || null) : null
+  }
+
   function entryFor(appId) {
-    return appId ? DesktopEntries.heuristicLookup(appId) : null
+    if (!appId) return null
+    return webAppEntry(appId) || DesktopEntries.heuristicLookup(appId)
   }
 
   function keyFor(toplevel) {
@@ -161,8 +182,19 @@ Item {
     })
   }
 
+  // From the desktop entry; for a window without one (e.g. a terminal started
+  // with its own class), the entry or program found behind its process.
   function launch(app) {
-    if (app.entry) Quickshell.execDetached(["uwsm-app", "--", app.entry.id + ".desktop"])
+    if (app.entry) { Quickshell.execDetached(["uwsm-app", "--", app.entry.id + ".desktop"]); return }
+    var found = root.fallbacks[app.appId]
+    if (!found) return
+    if (found.entry !== "") Quickshell.execDetached(["uwsm-app", "--", found.entry + ".desktop"])
+    else if (found.exe !== "") Quickshell.execDetached(["uwsm-app", "--", found.exe])
+  }
+
+  function canLaunch(app) {
+    var found = root.fallbacks[app.appId]
+    return !!app.entry || !!(found && (found.entry !== "" || found.exe !== ""))
   }
 
   // Not running: start it. Running elsewhere: bring its window up. Already
@@ -185,19 +217,21 @@ Item {
   }
 
   function iconFor(app) {
-    var name = app.entry && app.entry.icon ? app.entry.icon : (root.fallbackIcons[app.appId] || app.appId.toLowerCase())
+    var found = root.fallbacks[app.appId]
+    var name = app.entry && app.entry.icon ? app.entry.icon : (found && found.icon) || app.appId.toLowerCase()
+    if (!app.entry) Qt.callLater(root.lookupIcon, app.appId)
     var path = Quickshell.iconPath(name, true)
-    if (path === "") Qt.callLater(root.lookupIcon, app.appId)
     return path || Quickshell.iconPath("application-x-executable", true)
   }
 
-  // A window whose class has no desktop entry (e.g. `alacritty --class=x`)
-  // borrows the icon of the program behind it. Asked once per class.
-  property var fallbackIcons: ({})
+  // A window whose class has no desktop entry (e.g. `foot --app-id=x`) borrows
+  // the icon, entry and program of the process behind it: { icon, entry, exe }.
+  // Asked once per class.
+  property var fallbacks: ({})
   property var iconQueue: []
 
   function lookupIcon(appId) {
-    if (appId === "" || appId in root.fallbackIcons || root.iconQueue.indexOf(appId) !== -1) return
+    if (appId === "" || appId in root.fallbacks || root.iconQueue.indexOf(appId) !== -1) return
     root.iconQueue = root.iconQueue.concat([appId])
     if (!iconProc.running) nextIcon()
   }
@@ -212,15 +246,23 @@ Item {
   Process {
     id: iconProc
     property string appId: ""
+    // Prints the program name, then its executable path.
     command: ["bash", "-c",
       'pid=$(hyprctl clients -j | jq -r --arg c "$1" \'first(.[] | select(.class == $c) | .pid) // empty\'); '
-      + '[[ -n $pid ]] && cat "/proc/$pid/comm"', "omarchy-taskbar", appId]
+      + '[[ -n $pid ]] && cat "/proc/$pid/comm" && readlink -f "/proc/$pid/exe"', "omarchy-taskbar", appId]
     stdout: StdioCollector {
       onStreamFinished: {
-        var entry = root.entryFor(text.trim())
-        var icons = Object.assign({}, root.fallbackIcons)
-        icons[iconProc.appId] = entry && entry.icon ? entry.icon : ""
-        root.fallbackIcons = icons
+        var lines = text.split("\n")
+        var entry = root.entryFor((lines[0] || "").trim())
+        var exe = (lines[1] || "").trim()
+        var known = Object.assign({}, root.fallbacks)
+        known[iconProc.appId] = {
+          icon: entry && entry.icon ? entry.icon : "",
+          entry: entry ? entry.id : "",
+          // Only an absolute path to a real program; nothing else is run.
+          exe: /^\/[^\0\n]+$/.test(exe) ? exe : ""
+        }
+        root.fallbacks = known
       }
     }
     onExited: root.nextIcon()
@@ -415,7 +457,7 @@ Item {
           }
           MenuRow {
             text: root.t("New window", "Nueva ventana")
-            shown: !!button.app.entry
+            shown: root.canLaunch(button.app)
             onTriggered: { root.closeMenu(); root.launch(button.app) }
           }
           MenuRow {

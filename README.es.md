@@ -40,6 +40,9 @@ Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10:
 - **Clic izquierdo**: abre la app o la enfoca; si ya tiene el foco y varias
   ventanas, pasa a la siguiente.
 - **Clic central**: ventana nueva.
+- **Arrastrar archivos a cualquier barra**: ancla accesos de escritorio,
+  archivos de Windows (`.exe`/`.msi`) y programas ejecutables o AppImages al
+  final de tus anclajes.
 - **Varias ventanas de una app**: un clic muestra una miniatura de cada una con su escritorio (una sola captura, solo mientras la lista está abierta); eliges una y la barra te lleva a ella, aunque esté en otro escritorio.
 - **Clic derecho**: anclar/desanclar, ventana nueva, cerrar. Ventana nueva funciona con todas las apps, también con ventanas sin entrada de escritorio (como una terminal abierta con su propia clase).
 - **El icono correcto en apps que van detrás de otro programa**: las que corren dentro de una terminal (cliamp, Voxtype, las TUI de Docker y monitores de Omarchy) y las ventanas que abre un script (la ventana FreeRDP de la máquina virtual de Windows) muestran su propio icono. Solo se leen nombres de procesos, nunca líneas de órdenes.
@@ -65,6 +68,22 @@ ventana cuya clase no tiene acceso de aplicación (por ejemplo
 `alacritty --class=org.omarchy.agent`) usa el icono del programa que hay
 detrás, consultado una sola vez con `hyprctl`.
 
+## Anclar archivos arrastrándolos
+
+Arrastra un archivo compatible desde el gestor de archivos a cualquier barra.
+Los archivos `.desktop` instalados usan su id de entrada; los accesos que vienen
+de otro sitio se copian a tu carpeta de aplicaciones de usuario. Los programas
+y AppImages necesitan permiso de ejecución. Los archivos de Windows se abren
+con la aplicación predeterminada del sistema para su tipo MIME mediante
+`xdg-open`, incluido GE-Proton si lo tienes configurado como predeterminado.
+
+Para los archivos `.exe`, la barra extrae un icono si `wrestool` e `icotool`
+(icoutils) ya están instalados; si no, usa un icono genérico de ejecutable.
+Nunca instala paquetes. Se ignoran las rutas con `%` o caracteres de control,
+los archivos no compatibles y los elementos que no sean archivos. Haz clic
+derecho en el anclaje y elige **Desanclar** para quitarlo junto con el acceso y
+el icono generados; el archivo original permanece en su sitio.
+
 ## Instalar, actualizar y quitar
 
 ```bash
@@ -88,8 +107,20 @@ el código nuevo.
   doble de su altura y el ancho de la pantalla. Si falta el archivo, el JSON no
   es válido o `width` falta o no es válido, se mantiene el ancho completo.
   La barra nunca crea ni escribe este archivo.
-- No escribe nada más fuera de la carpeta del plugin. Para no dejar rastro
-  después de `omarchy plugin remove`: `rm -r ~/.config/omarchy-taskbar`.
+- `~/.local/share/applications/omarchy-taskbar-<hash>.desktop`: accesos
+  generados para los programas arrastrados y copias de archivos `.desktop`
+  externos.
+- `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
+  iconos extraídos de archivos de Windows, cuando están disponibles.
+
+Al desanclar se eliminan el acceso y el icono generados. Después de quitar el
+plugin, borra los anclajes y archivos generados que queden con:
+
+```bash
+rm -rf -- ~/.config/omarchy-taskbar
+rm -f -- ~/.local/share/applications/omarchy-taskbar-*.desktop \
+  ~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-*.png
+```
 
 ## Licencia
 

@@ -40,6 +40,8 @@ a click shows each one with its workspace, and picking one jumps there.
 - **Left click**: open the app, or focus it; if it is already focused and has
   several windows, step to the next one.
 - **Middle click**: new window.
+- **Drag files onto any bar**: pin desktop launchers, Windows files
+  (`.exe`/`.msi`), and executable programs or AppImages at the end of your pins.
 - **Several windows of one app**: a click shows a thumbnail of each with its
   workspace (one frame, taken only while the list is open); pick one and the bar takes you there, even on another workspace.
 - **Right click**: pin/unpin, new window, close. New window works for every
@@ -58,15 +60,30 @@ a click shows each one with its workspace, and picking one jumps there.
 
 ## Lean by design
 
-Nothing to install and no sudo. It only uses what Omarchy already ships:
-Quickshell's window list, desktop entries and icon theme, Omarchy's theme
-tokens, `omarchy bar transparent` and `uwsm-app` to start apps. It reacts to
-events (windows opening/closing, file changes) and never polls.
+Nothing to install and no administrator permissions needed. It only uses what
+Omarchy already ships: Quickshell's window list, desktop entries and icon theme,
+Omarchy's theme tokens, `omarchy bar transparent` and `uwsm-app` to start apps.
+It reacts to events (windows opening/closing, file changes) and never polls.
 
 The first time it pins your default browser (`omarchy-cmd-default-browser`),
 file manager and terminal. A window whose class has no desktop entry (for
 example `alacritty --class=org.omarchy.agent`) borrows the icon of the program
 behind it, looked up once with `hyprctl`.
+
+## Pin files by dragging
+
+Drag a supported file from your file manager onto any bar. Installed `.desktop`
+files use their desktop entry id; launchers from elsewhere are copied into your
+user applications folder. Programs and AppImages need execute permission.
+Windows files open with the system default handler for their MIME type through
+`xdg-open`, including GE-Proton if that is your configured handler.
+
+For `.exe` files, the bar extracts an icon when both `wrestool` and `icotool`
+(icoutils) are already installed; otherwise it uses a generic executable icon.
+It never installs packages. Paths containing `%` or control characters,
+unsupported files and non-file drops are ignored. Right-click the pin and choose
+**Unpin** to remove it and its generated launcher and icon; the original file
+stays in place.
 
 ## Install, update and remove
 
@@ -88,8 +105,19 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
   with width clamped between twice the bar height and the screen width. A missing
   file, invalid JSON or an absent/invalid `width` keeps the full-width default.
   The bar never creates or writes this file.
-- Nothing else is written outside the plugin folder. To remove every trace
-  after `omarchy plugin remove`: `rm -r ~/.config/omarchy-taskbar`.
+- `~/.local/share/applications/omarchy-taskbar-<hash>.desktop`: launchers
+  generated for dropped programs and copies of external `.desktop` files.
+- `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
+  extracted Windows icons, when available.
+
+Unpinning removes the generated launcher and icon. After removing the plugin,
+clean up any remaining pins and generated files with:
+
+```bash
+rm -rf -- ~/.config/omarchy-taskbar
+rm -f -- ~/.local/share/applications/omarchy-taskbar-*.desktop \
+  ~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-*.png
+```
 
 ## License
 

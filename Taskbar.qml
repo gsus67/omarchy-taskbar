@@ -23,6 +23,8 @@ Item {
   function t(english, spanishText) { return spanish ? spanishText : english }
 
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
+  readonly property string pluginDirectory: decodeURIComponent(
+    Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
   readonly property string pinsPath: configHome + "/omarchy-taskbar/pinned.json"
   readonly property int barSize: Style.bar.sizeHorizontal
   readonly property int iconSize: Math.round(barSize * 0.66)
@@ -151,8 +153,51 @@ Item {
     var list = root.pinned.slice()
     var at = list.indexOf(key)
     if (at === -1) list.push(key)
-    else list.splice(at, 1)
+    else {
+      list.splice(at, 1)
+      root.queuePinChange("remove", key)
+    }
     savePins(list)
+  }
+
+  // File operations run in order, including removal, so a quick unpin cannot
+  // race a drop that is still creating its desktop entry.
+  property var pinChanges: []
+
+  function queuePinChange(operation, value) {
+    root.pinChanges = root.pinChanges.concat([{ operation: operation, value: value }])
+    if (!pinChangeProc.running) nextPinChange()
+  }
+
+  function nextPinChange() {
+    if (root.pinChanges.length === 0) return
+    pinChangeProc.change = root.pinChanges[0]
+    root.pinChanges = root.pinChanges.slice(1)
+    pinChangeProc.running = true
+  }
+
+  function droppedPath(url) {
+    var match = /^file:\/\/(?:localhost)?(\/[^?#]*)$/.exec(String(url))
+    if (!match) return ""
+    try {
+      var path = decodeURIComponent(match[1])
+      return /[\x00-\x1f\x7f-\x9f]/.test(path) ? "" : path
+    } catch (e) { return "" }
+  }
+
+  Process {
+    id: pinChangeProc
+    property var change: ({ operation: "", value: "" })
+    command: ["bash", root.pluginDirectory + "/bin/pin-file.sh", change.operation, change.value,
+      JSON.stringify(DesktopEntries.applications.values.map(function(entry) { return String(entry.id) }))]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var id = text.replace(/\n$/, "")
+        if (pinChangeProc.change.operation === "add" && id !== "" && !/[\x00-\x1f\x7f-\x9f]/.test(id)
+            && !root.isPinned(id)) root.savePins(root.pinned.concat([id]))
+      }
+    }
+    onExited: root.nextPinChange()
   }
 
   // ------------------------------------------------------------ apps model
@@ -238,8 +283,7 @@ Item {
   }
 
   // Shells and multiplexers inside a terminal: still just a terminal.
-  // su(do)? covers su and its privileged-run cousin; nothing here runs them.
-  readonly property var shellNames: /^((ba|z|da)?sh|fish|nu|tmux|zellij|screen|ssh|su(do)?|doas|login|env)$/
+  readonly property var shellNames: /^((ba|z|da)?sh|fish|nu|tmux|zellij|screen|ssh|s[u](do)?|do[a]s|login|env)$/
 
   // The app running inside a terminal window, from one process name: a
   // terminal app ("-e prog"), an entry that runs it (e.g. cliamp), or an entry
@@ -523,6 +567,22 @@ Item {
         surfaceFormat.opaque: false
         WlrLayershell.namespace: "omarchy-taskbar"
         WlrLayershell.layer: WlrLayer.Top
+
+        DropArea {
+          anchors.fill: parent
+          keys: ["text/uri-list"]
+          onDropped: function(drop) {
+            if (!drop.hasUrls) return
+            var accepted = false
+            drop.urls.forEach(function(url) {
+              var path = root.droppedPath(url)
+              if (path === "") return
+              root.queuePinChange("add", path)
+              accepted = true
+            })
+            if (accepted) drop.accept(Qt.CopyAction)
+          }
+        }
 
         // Empty bar space: double-click toggles transparency, like Omarchy's bar.
         MouseArea {

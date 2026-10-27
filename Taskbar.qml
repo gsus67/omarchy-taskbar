@@ -645,6 +645,13 @@ Item {
                 root.focusWindow(target)
                 root.closeMenu()
               }
+              // Close just this window; the list follows it, or goes when
+              // it was the last one.
+              onCloseRequested: {
+                var last = button.windows.length <= 1
+                modelData.close()
+                if (last) root.closeMenu()
+              }
             }
           }
         }
@@ -762,6 +769,7 @@ Item {
     property string workspace
     property bool current: false
     signal triggered()
+    signal closeRequested()
 
     readonly property int thumbWidth: Style.space(220)
     readonly property int thumbHeight: Math.round(thumbWidth * 9 / 16)
@@ -837,11 +845,45 @@ Item {
       font.pixelSize: Style.font.bodySmall
     }
 
+    // Middle click closes the window too, as on other taskbars.
     MouseArea {
       id: windowMouse
       anchors.fill: parent
       hoverEnabled: true
-      onClicked: windowRow.triggered()
+      acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+      onClicked: function(event) {
+        if (event.button === Qt.MiddleButton) windowRow.closeRequested()
+        else windowRow.triggered()
+      }
+    }
+
+    // Close button in the thumbnail's corner, like a window's own, shown while
+    // hovering the row. Follows the theme's rounding and turns urgent on hover.
+    Rectangle {
+      anchors.top: thumbFrame.top
+      anchors.right: thumbFrame.right
+      width: closeGlyph.implicitHeight + Style.space(8)
+      height: width
+      radius: Style.cornerRadius
+      visible: windowMouse.containsMouse || closeMouse.containsMouse
+      color: closeMouse.containsMouse ? Commons.Color.urgent : Commons.Color.menu.background
+
+      Text {
+        id: closeGlyph
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: "\u{F0156}"
+        color: closeMouse.containsMouse ? Commons.Color.background : Commons.Color.menu.text
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      MouseArea {
+        id: closeMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        onClicked: windowRow.closeRequested()
+      }
     }
   }
 

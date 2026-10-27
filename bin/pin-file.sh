@@ -67,8 +67,9 @@ extract_icon() (
   done
   for png in "$tmp"/*256x256*.png "$tmp"/*.png; do
     [[ -f $png ]] || continue
+    # A full path: a name would miss a stale icon-theme.cache.
     if mkdir -p -- "$icons" && cp -- "$png" "$icons/$id.png"; then
-      printf '%s' "$id"
+      printf '%s' "$icons/$id.png"
     fi
     break
   done
@@ -86,7 +87,7 @@ write_launcher() {
   name=${name%.*}
   [[ -n $name ]] || return 1
   printf '[Desktop Entry]\nType=Application\nName=%s\nExec=%s\nIcon=%s\nTerminal=false\n' \
-    "$(desktop_value "$name")" "$exec_line" "${icon:-application-x-executable}"
+    "$(desktop_value "$name")" "$exec_line" "$(desktop_value "${icon:-application-x-executable}")"
 }
 
 add_pin() (

@@ -231,7 +231,7 @@ class FilePinTest(unittest.TestCase):
         self.file("icotool", '#!/bin/bash\nprintf png > "$3/icon.png"\n',
                   executable=True, parent=self.bin)
         key = self.run_script("add", self.file("Game.exe"))
-        self.assertIn(f"Icon={key}\n", self.entry(key).read_text())
+        self.assertIn(f"Icon={self.icons / (key + '.png')}\n", self.entry(key).read_text())
         self.assertEqual((self.icons / (key + ".png")).read_text(), "png")
         self.run_script("remove", key)
         self.assertFalse(self.entry(key).exists())

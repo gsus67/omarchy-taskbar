@@ -47,10 +47,10 @@ class ReorderTest(unittest.TestCase):
         self.assertIn("else root.launch(button.app)", clicked)
         self.assertNotIn("drag.target:", POINTER)
 
-    def test_escape_and_pointer_cancellation_clear_the_drag(self):
-        self.assertIn("Keys.onEscapePressed: barWindow.clearBarDrag()", BAR)
-        self.assertIn("barDragSource ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None", BAR)
-        self.assertIn("onBarDragSourceChanged: if (barDragSource) dragKeys.forceActiveFocus()", BAR)
+    def test_pointer_cancellation_clears_the_drag(self):
+        # Like Omarchy's bar, never grab the keyboard: a focus change on the
+        # layer surface cancels the pointer grab mid-drag.
+        self.assertNotIn("WlrKeyboardFocus.Exclusive", BAR)
         self.assertIn("if (dragging && bar.barDragSource === button) bar.updateBarDrag", POINTER)
         self.assertRegex(POINTER, r"onCanceled: \{\s*dragging = false\s*suppressClick = true\s*bar.clearBarDrag\(\)")
         clear = BAR[BAR.index("function clearBarDrag()"):BAR.index("function captureBarDragGhost(")]

@@ -43,7 +43,7 @@ Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10:
 - **Arrastrar iconos de apps**: reordena los anclajes con la misma vista flotante
   y el mismo marcador de inserción que la barra superior de Omarchy. Suelta una
   app abierta entre los anclajes para anclarla ahí. El orden se guarda en
-  `pinned.json` y se comparte en todas las pantallas. Escape o soltar fuera de la
+  `pinned.json` y se comparte en todas las pantallas. Soltar fuera de la
   barra cancela; soltar sobre el mismo icono no cambia nada.
 - **Arrastrar archivos a cualquier barra**: ancla accesos de escritorio,
   archivos de Windows (`.exe`/`.msi`) y programas ejecutables o AppImages al

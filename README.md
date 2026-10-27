@@ -42,8 +42,8 @@ a click shows each one with its workspace, and picking one jumps there.
 - **Middle click**: new window.
 - **Drag app icons**: reorder pins with the same floating preview and insertion
   marker as Omarchy's top bar. Drop a running app into the pins to pin it there.
-  The order is saved in `pinned.json` and shared by every screen. Escape or a
-  drop outside the bar cancels; dropping onto the same icon changes nothing.
+  The order is saved in `pinned.json` and shared by every screen. A drop outside
+  the bar cancels; dropping onto the same icon changes nothing.
 - **Drag files onto any bar**: pin desktop launchers, Windows files
   (`.exe`/`.msi`), and executable programs or AppImages at the end of your pins.
 - **Several windows of one app**: a click shows a thumbnail of each with its

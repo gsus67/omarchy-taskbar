@@ -739,16 +739,8 @@ Item {
         surfaceFormat.opaque: false
         WlrLayershell.namespace: "omarchy-taskbar"
         WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.keyboardFocus: barDragSource ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-        onBarDragSourceChanged: if (barDragSource) dragKeys.forceActiveFocus()
         onWidthChanged: clearBarDrag()
         onHeightChanged: clearBarDrag()
-
-        Item {
-          id: dragKeys
-          focus: barWindow.barDragSource !== null
-          Keys.onEscapePressed: barWindow.clearBarDrag()
-        }
 
         DragGhostPanel { bar: barWindow }
 
@@ -1013,7 +1005,6 @@ Item {
           bar.barDragSource = button
           dragging = true
         }
-        // Escape clears the source while keeping this gesture consumed.
         if (dragging && bar.barDragSource === button) bar.updateBarDrag(button, event.x, event.y)
       }
       onReleased: function(event) {

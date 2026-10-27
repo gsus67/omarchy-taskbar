@@ -26,7 +26,17 @@ class ShellCommandTest(unittest.TestCase):
             line = SOURCE.count("\n", 0, call.start()) + 1
             self.assertIsNotNone(match, f"line {line}: bash -c script must be literals only, data only after \"omarchy-taskbar\" ($0)")
 
-    def test_no_shell_other_than_bash_c(self):
+    def test_no_privilege_commands(self):
+        for source in [SOURCE] + [path.read_text() for path in (ROOT / "bin").glob("*.sh")]:
+            self.assertNotRegex(source, r"\b(?:s[u](?:do)?|pkex[e]c|do[a]s)\b")
+
+    def test_bash_only_runs_literal_scripts_or_the_pin_script_with_positional_data(self):
+        for call in re.finditer(r'"bash",\s*', SOURCE):
+            rest = SOURCE[call.end():]
+            self.assertRegex(rest, r'^(?:"-c",|root\.pluginDirectory \+ "/bin/pin-file\.sh",\s*'
+                             r'change\.operation,\s*change\.value,\s*JSON\.stringify\()')
+
+    def test_no_other_shells(self):
         for shell in ('"sh"', '"/bin/sh"', '"zsh"', '"eval"'):
             self.assertNotIn(shell, SOURCE)
 
@@ -49,8 +59,9 @@ class ShellCommandTest(unittest.TestCase):
     def test_never_reads_command_lines(self):
         # Command lines can hold secrets (passwords passed to xfreerdp, tokens);
         # only process names and executable paths may be read.
-        self.assertNotIn("/cmdline", SOURCE)
-        self.assertNotIn("/environ", SOURCE)
+        for source in [SOURCE] + [path.read_text() for path in (ROOT / "bin").glob("*.sh")]:
+            self.assertNotIn("/cmdline", source)
+            self.assertNotIn("/environ", source)
 
 
 if __name__ == "__main__":

@@ -487,15 +487,82 @@ Item {
     windowsFor(app.key).forEach(function(toplevel) { toplevel.close() })
   }
 
+  // ------------------------------------------------------------ icons
+
+  // Ported from Omarchy's shell/services/AppLibrary.qml: panel plugins do
+  // not receive shell.appLibrary. The index bypasses stale theme caches.
+  property var iconIndex: ({})
+  property var pendingIconIndex: ({})
+
+  function iconSource(icon) {
+    var value = String(icon || "")
+    if (value.length === 0) return Quickshell.iconPath("application-x-executable", true)
+    if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
+    if (value.charAt(0) === "/") return Util.fileUrl(value)
+    // Prefer app/device icons: a themed lookup can pick an action such as zoom.
+    var found = root.iconIndex[value]
+    if (found) return Util.fileUrl(found)
+    var themed = Quickshell.iconPath(value, true)
+    if (themed.length > 0) return themed
+    return Quickshell.iconPath("application-x-executable", true)
+  }
+
   function iconFor(app) {
     var found = root.fallbacks[app.lookup]
     // A pinned program path: its file name ("/usr/bin/foot" → "foot").
     var own = app.appId !== "" ? app.appId.toLowerCase() : String(app.exe || "").split("/").pop()
     var name = app.entry && app.entry.icon ? app.entry.icon : (found && found.icon) || own
     if (!app.entry && app.lookup !== "") Qt.callLater(root.lookupIcon, app.lookup)
-    var path = Quickshell.iconPath(name, true)
-    return path || Quickshell.iconPath("application-x-executable", true)
+    return root.iconSource(name)
   }
+
+  function refreshIcons() {
+    if (!iconIndexScan.running) iconIndexScan.running = true
+  }
+
+  function indexIconLine(path) {
+    var value = String(path || "").trim()
+    if (value.length === 0) return
+    var slash = value.lastIndexOf("/")
+    var file = slash >= 0 ? value.slice(slash + 1) : value
+    var dot = file.lastIndexOf(".")
+    var name = dot > 0 ? file.slice(0, dot) : file
+    if (name.length > 0 && root.pendingIconIndex[name] === undefined)
+      root.pendingIconIndex[name] = value
+  }
+
+  Process {
+    id: iconIndexScan
+    // Non-login shell: profile activation can touch the watched desktop-entry
+    // dirs and trigger an endless rescan. $1: home, $2: XDG dirs, $3: pixmaps.
+    // Match Omarchy's dirs and app/device contexts, emitting SVGs before PNGs
+    // so the first hit per name prefers a scalable icon. Arrays preserve spaces.
+    command: ["bash", "-c",
+      'bases=("$1/.icons" "$1/.local/share/icons"); '
+      + 'IFS=: read -r -a data_dirs <<< "$2"; '
+      + 'for d in "${data_dirs[@]}"; do bases+=("$d/icons"); done; '
+      + 'for ext in svg png; do for base in "${bases[@]}"; do '
+      + '[[ -d $base ]] && find "$base" \\( -path "*/apps/*" -o -path "*/devices/*" \\) -name "*.$ext" 2>/dev/null; '
+      + 'done; find "$3" -maxdepth 1 -name "*.$ext" 2>/dev/null; done', "omarchy-taskbar",
+      Quickshell.env("HOME"), Quickshell.env("XDG_DATA_DIRS") || "/usr/local/share:/usr/share", "/usr/share/pixmaps"]
+    stdout: SplitParser { onRead: function(line) { root.indexIconLine(line) } }
+    onStarted: root.pendingIconIndex = ({})
+    // Replace the property only when complete, re-evaluating icon bindings.
+    onExited: root.iconIndex = root.pendingIconIndex
+  }
+
+  Timer {
+    id: iconIndexDebounce
+    interval: 750
+    onTriggered: root.refreshIcons()
+  }
+
+  Connections {
+    target: DesktopEntries.applications
+    function onValuesChanged() { iconIndexDebounce.restart() }
+  }
+
+  Component.onCompleted: root.refreshIcons()
 
   // A window whose class has no desktop entry (e.g. `foot --app-id=x`) borrows
   // the icon, entry and program of the process behind it: { icon, entry, exe }.

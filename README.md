@@ -82,6 +82,12 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
 
 - `~/.config/omarchy-taskbar/pinned.json`: your pinned apps (desktop entry ids,
   in order). You can edit it by hand; the bar picks up changes at once.
+- `~/.config/omarchy-taskbar/config.json`: optional settings you create and edit
+  by hand; changes apply at once. Set `width` to pixels (`{"width": 960}`) or a
+  percentage of each screen's width (`{"width": "60%"}`). The bar is centered,
+  with width clamped between twice the bar height and the screen width. A missing
+  file, invalid JSON or an absent/invalid `width` keeps the full-width default.
+  The bar never creates or writes this file.
 - Nothing else is written outside the plugin folder. To remove every trace
   after `omarchy plugin remove`: `rm -r ~/.config/omarchy-taskbar`.
 

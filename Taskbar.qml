@@ -30,6 +30,7 @@ Item {
 
   property var pinned: []
   property bool transparent: false
+  property var configuredWidth: null
 
   // The one right-click menu open, if any. Opening another or clicking the
   // bar closes it.
@@ -66,6 +67,35 @@ Item {
 
   function toggleTransparent() {
     Quickshell.execDetached(["omarchy", "bar", "transparent", "toggle"])
+  }
+
+  // ------------------------------------------------------------ bar width
+
+  // Optional, hand-edited settings. Missing or invalid config keeps the
+  // full-width bar; each screen resolves percentages against its own width.
+  FileView {
+    id: configFile
+    path: root.configHome + "/omarchy-taskbar/config.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var config = JSON.parse(text())
+        root.configuredWidth = config && typeof config === "object" && !Array.isArray(config) ? config.width : null
+      } catch (e) {
+        root.configuredWidth = null
+      }
+    }
+    onLoadFailed: root.configuredWidth = null
+  }
+
+  function widthFor(value, screenWidth, barSize) {
+    var width = typeof value === "number" ? value : NaN
+    if (typeof value === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$/.test(value.trim()))
+      width = screenWidth * (parseFloat(value) / 100)
+    if (!isFinite(width)) return screenWidth
+    return Math.min(screenWidth, Math.max(barSize * 2, Math.round(width)))
   }
 
   // ------------------------------------------------------------ pinned apps
@@ -476,6 +506,7 @@ Item {
       PanelWindow {
         id: barWindow
         required property var modelData
+        readonly property int targetWidth: root.widthFor(root.configuredWidth, modelData.width, root.barSize)
 
         screen: modelData
         anchors {
@@ -483,6 +514,9 @@ Item {
           left: true
           right: true
         }
+        // Keep three anchors so Auto still reserves the bar's height.
+        margins.left: Math.floor((modelData.width - targetWidth) / 2)
+        margins.right: Math.ceil((modelData.width - targetWidth) / 2)
         implicitHeight: root.barSize
         exclusionMode: ExclusionMode.Auto
         color: root.transparent ? "transparent" : Commons.Color.bar.background

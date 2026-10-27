@@ -81,6 +81,13 @@ el código nuevo.
 - `~/.config/omarchy-taskbar/pinned.json`: tus apps ancladas (ids de los
   accesos, en orden). Puedes editarlo a mano; la barra recoge los cambios al
   momento.
+- `~/.config/omarchy-taskbar/config.json`: ajustes opcionales que creas y editas
+  a mano; los cambios se aplican al momento. Usa `width` en píxeles
+  (`{"width": 960}`) o como porcentaje del ancho de cada pantalla
+  (`{"width": "60%"}`). La barra queda centrada, con el ancho limitado entre el
+  doble de su altura y el ancho de la pantalla. Si falta el archivo, el JSON no
+  es válido o `width` falta o no es válido, se mantiene el ancho completo.
+  La barra nunca crea ni escribe este archivo.
 - No escribe nada más fuera de la carpeta del plugin. Para no dejar rastro
   después de `omarchy plugin remove`: `rm -r ~/.config/omarchy-taskbar`.
 

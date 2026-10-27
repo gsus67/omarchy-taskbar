@@ -100,13 +100,16 @@ el código nuevo.
 - `~/.config/omarchy-taskbar/pinned.json`: tus apps ancladas (ids de los
   accesos, en orden). Puedes editarlo a mano; la barra recoge los cambios al
   momento.
-- `~/.config/omarchy-taskbar/config.json`: ajustes opcionales que creas y editas
-  a mano; los cambios se aplican al momento. Usa `width` en píxeles
+- `~/.config/omarchy-taskbar/config.json`: ajustes opcionales; los cambios se
+  aplican al momento. Haz clic derecho en un espacio vacío de la barra para poner
+  `scale` en **1x** (tamaño original y predeterminado), **1.25x**, **1.5x** o
+  **2x**. Esto escala la altura de la barra y los iconos; si `scale` falta o no
+  es válido, se usa 1x. **1x** elimina `scale`, conserva los demás ajustes y
+  borra el archivo si queda vacío. Edita `width` a mano en píxeles
   (`{"width": 960}`) o como porcentaje del ancho de cada pantalla
   (`{"width": "60%"}`). La barra queda centrada, con el ancho limitado entre el
   doble de su altura y el ancho de la pantalla. Si falta el archivo, el JSON no
   es válido o `width` falta o no es válido, se mantiene el ancho completo.
-  La barra nunca crea ni escribe este archivo.
 - `~/.local/share/applications/omarchy-taskbar-<hash>.desktop`: accesos
   generados para los programas arrastrados y copias de archivos `.desktop`
   externos.

@@ -26,13 +26,14 @@ Item {
   readonly property string pluginDirectory: decodeURIComponent(
     Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
   readonly property string pinsPath: configHome + "/omarchy-taskbar/pinned.json"
-  readonly property int barSize: Style.bar.sizeHorizontal
+  readonly property int barSize: Math.round(Style.bar.sizeHorizontal * configuredScale)
   readonly property int iconSize: Math.round(barSize * 0.66)
   readonly property color foreground: Commons.Color.bar.text
 
   property var pinned: []
   property bool transparent: false
   property var configuredWidth: null
+  property real configuredScale: 1
 
   // The one right-click menu open, if any. Opening another or clicking the
   // bar closes it.
@@ -71,9 +72,9 @@ Item {
     Quickshell.execDetached(["omarchy", "bar", "transparent", "toggle"])
   }
 
-  // ------------------------------------------------------------ bar width
+  // ------------------------------------------------------------ bar size
 
-  // Optional, hand-edited settings. Missing or invalid config keeps the
+  // Optional settings. Missing or invalid config keeps the
   // full-width bar; each screen resolves percentages against its own width.
   FileView {
     id: configFile
@@ -85,12 +86,19 @@ Item {
       try {
         var config = JSON.parse(text())
         root.configuredWidth = config && typeof config === "object" && !Array.isArray(config) ? config.width : null
+        root.configuredScale = root.scaleFor(config && config.scale)
       } catch (e) {
         root.configuredWidth = null
+        root.configuredScale = 1
       }
     }
-    onLoadFailed: root.configuredWidth = null
+    onLoadFailed: {
+      root.configuredWidth = null
+      root.configuredScale = 1
+    }
   }
+
+  function scaleFor(value) { return [1, 1.25, 1.5, 2].indexOf(value) !== -1 ? value : 1 }
 
   function widthFor(value, screenWidth, barSize) {
     var width = typeof value === "number" ? value : NaN
@@ -98,6 +106,21 @@ Item {
       width = screenWidth * (parseFloat(value) / 100)
     if (!isFinite(width)) return screenWidth
     return Math.min(screenWidth, Math.max(barSize * 2, Math.round(width)))
+  }
+
+  function saveConfig(key, value) {
+    var config = {}
+    try {
+      var parsed = JSON.parse(configFile.text())
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) config = parsed
+    } catch (e) {}
+    if (value === null) delete config[key]
+    else config[key] = value
+    Quickshell.execDetached(["bash", "-c",
+      'if [[ -z $2 ]]; then rm -f -- "$1"; else '
+      + 'mkdir -p -- "${1%/*}" || exit; tmp=$(mktemp -- "$1.XXXXXX") || exit; '
+      + 'trap \'rm -f -- "$tmp"\' EXIT; printf "%s\\n" "$2" >"$tmp" && mv -f -- "$tmp" "$1"; fi',
+      "omarchy-taskbar", configFile.path, Object.keys(config).length ? JSON.stringify(config, null, 2) : ""])
   }
 
   // ------------------------------------------------------------ pinned apps
@@ -584,11 +607,18 @@ Item {
           }
         }
 
-        // Empty bar space: double-click toggles transparency, like Omarchy's bar.
+        // Empty bar space: size menu and double-click transparency.
         MouseArea {
           anchors.fill: parent
           acceptedButtons: Qt.LeftButton | Qt.RightButton
           onPressed: root.closeMenu()
+          onClicked: function(event) {
+            if (event.button === Qt.RightButton) {
+              sizeMenu.anchor.rect.x = event.x
+              sizeMenu.anchor.rect.y = event.y
+              root.showMenu(sizeMenu)
+            }
+          }
           onDoubleClicked: function(event) {
             if (event.button === Qt.LeftButton) root.toggleTransparent()
           }
@@ -606,6 +636,57 @@ Item {
               required property var modelData
               app: modelData
             }
+          }
+        }
+
+        PopupWindow {
+          id: sizeMenu
+          visible: false
+          anchor.window: barWindow
+          anchor.rect.width: 1
+          anchor.rect.height: 1
+          anchor.edges: Edges.Top
+          anchor.gravity: Edges.Top
+          anchor.margins.top: -Style.space(4)
+          implicitWidth: sizeColumn.implicitWidth + Style.space(8)
+          implicitHeight: sizeColumn.implicitHeight + Style.space(8)
+          color: "transparent"
+
+          Rectangle {
+            anchors.fill: parent
+            focus: true
+            Keys.onEscapePressed: root.closeMenu()
+            color: Commons.Color.menu.background
+            border.color: Commons.Color.menu.border
+            border.width: Style.normalBorderWidth
+            radius: Style.cornerRadius
+
+            Column {
+              id: sizeColumn
+              anchors.centerIn: parent
+
+              Repeater {
+                model: [1, 1.25, 1.5, 2]
+                delegate: MenuRow {
+                  required property var modelData
+                  text: modelData + "x"
+                  checkable: true
+                  checked: root.configuredScale === modelData
+                  onTriggered: { root.closeMenu(); root.saveConfig("scale", modelData === 1 ? null : modelData) }
+                }
+              }
+            }
+          }
+
+          onVisibleChanged: {
+            if (visible) Qt.callLater(function() { sizeGrab.active = sizeMenu.visible })
+            else sizeGrab.active = false
+          }
+
+          HyprlandFocusGrab {
+            id: sizeGrab
+            windows: [sizeMenu, barWindow]
+            onCleared: if (root.openMenu === sizeMenu) root.closeMenu()
           }
         }
       }
@@ -986,20 +1067,35 @@ Item {
 
     property string text
     property bool shown: true
+    property bool checkable: false
+    property bool checked: false
+    readonly property int checkWidth: checkable ? Style.space(20) : 0
     signal triggered()
 
     visible: shown
-    width: Math.max(Style.space(140), rowLabel.implicitWidth + Style.space(24))
+    width: Math.max(Style.space(140), rowLabel.implicitWidth + Style.space(24) + checkWidth)
     height: shown ? rowLabel.implicitHeight + Style.space(12) : 0
     radius: Style.cornerRadius
     color: rowMouse.containsMouse ? Commons.Color.menu.selectedBackground : "transparent"
+
+    Text {
+      textFormat: Text.PlainText
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      width: row.checkWidth
+      text: row.checked ? "✓" : ""
+      visible: row.checkable
+      color: rowLabel.color
+      font: rowLabel.font
+    }
 
     Text {
       id: rowLabel
       textFormat: Text.PlainText
       anchors.verticalCenter: parent.verticalCenter
       anchors.left: parent.left
-      anchors.leftMargin: Style.space(12)
+      anchors.leftMargin: Style.space(12) + row.checkWidth
       text: row.text
       color: rowMouse.containsMouse ? Commons.Color.menu.selectedText : Commons.Color.menu.text
       font.family: Style.font.family
@@ -1010,10 +1106,7 @@ Item {
       id: rowMouse
       anchors.fill: parent
       hoverEnabled: true
-      onClicked: {
-        menu.visible = false
-        row.triggered()
-      }
+      onClicked: row.triggered()
     }
   }
 }

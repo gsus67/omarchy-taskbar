@@ -99,12 +99,15 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
 
 - `~/.config/omarchy-taskbar/pinned.json`: your pinned apps (desktop entry ids,
   in order). You can edit it by hand; the bar picks up changes at once.
-- `~/.config/omarchy-taskbar/config.json`: optional settings you create and edit
-  by hand; changes apply at once. Set `width` to pixels (`{"width": 960}`) or a
-  percentage of each screen's width (`{"width": "60%"}`). The bar is centered,
-  with width clamped between twice the bar height and the screen width. A missing
+- `~/.config/omarchy-taskbar/config.json`: optional settings; changes apply at
+  once. Right-click empty bar space to set `scale` to **1x** (original size,
+  default), **1.25x**, **1.5x** or **2x**. This scales the bar height and icons;
+  missing or invalid `scale` uses 1x. **1x** removes `scale`, keeping other
+  settings, and deletes the file if empty. Set `width` by hand in pixels
+  (`{"width": 960}`) or a percentage of each screen's width (`{"width": "60%"}`).
+  The bar is centered, with width clamped between twice the bar height and the
+  screen width. A missing
   file, invalid JSON or an absent/invalid `width` keeps the full-width default.
-  The bar never creates or writes this file.
 - `~/.local/share/applications/omarchy-taskbar-<hash>.desktop`: launchers
   generated for dropped programs and copies of external `.desktop` files.
 - `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:

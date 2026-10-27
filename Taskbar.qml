@@ -183,6 +183,18 @@ Item {
     savePins(list)
   }
 
+  function movePin(app, index) {
+    if (!app || index < 0 || (!root.isPinned(app.key) && !root.canPin(app))) return
+    var list = root.pinned.slice()
+    var at = list.indexOf(app.key)
+    if (at !== -1) {
+      list.splice(at, 1)
+      if (at < index) index -= 1
+    }
+    list.splice(index, 0, app.key)
+    if (JSON.stringify(list) !== JSON.stringify(root.pinned)) root.savePins(list)
+  }
+
   // File operations run in order, including removal, so a quick unpin cannot
   // race a drop that is still creating its desktop entry.
   property var pinChanges: []
@@ -642,6 +654,76 @@ Item {
         required property var modelData
         readonly property int targetWidth: root.widthFor(root.configuredWidth, modelData.width, root.barSize)
 
+        // Reuse Omarchy's Bar.qml drag threshold, captured ghost and marker.
+        // Each screen owns its gesture; only the saved pins are shared.
+        property var barDragSource: null
+        property var barDragTarget: null
+        property bool barDragAfter: false
+        property int barDragIndex: -1
+        property var barDragTargetGeometry: null
+        property url barDragImageUrl: ""
+        property point barDragScreenPoint: Qt.point(0, 0)
+        property point barDragOffset: Qt.point(0, 0)
+
+        function clearBarDrag() {
+          barDragSource = null
+          barDragTarget = null
+          barDragAfter = false
+          barDragIndex = -1
+          barDragTargetGeometry = null
+          barDragImageUrl = ""
+          barDragScreenPoint = Qt.point(0, 0)
+          barDragOffset = Qt.point(0, 0)
+        }
+
+        function captureBarDragGhost(button) {
+          var item = button.activeItem
+          item.grabToImage(function(result) {
+            if (barWindow.barDragSource === button && result && result.url)
+              barWindow.barDragImageUrl = result.url
+          }, Qt.size(Math.max(1, Math.ceil(item.width)), Math.max(1, Math.ceil(item.height))))
+        }
+
+        function screenPoint(point) {
+          return Qt.point(point.x + margins.left, point.y + screen.height - height)
+        }
+
+        function updateBarDrag(button, x, y) {
+          var point = button.mapToItem(null, x, y)
+          barDragScreenPoint = screenPoint(point)
+          barDragTarget = null
+          barDragAfter = false
+          barDragIndex = -1
+          barDragTargetGeometry = null
+          if (point.x < 0 || point.x >= width || point.y < 0 || point.y >= height) return
+          // Returning to the source icon is a no-op, including an unpinned app.
+          if (x >= 0 && x < button.width && y >= 0 && y < button.height) return
+
+          var bestDistance = Infinity
+          for (var i = 0; i < appButtons.count; i++) {
+            var slot = appButtons.itemAt(i)
+            if (!slot) continue
+            var start = slot.mapToItem(null, 0, 0)
+            var pinIndex = root.pinned.indexOf(slot.app.key)
+            var beforeDistance = Math.abs(point.x - start.x)
+            var afterDistance = pinIndex < 0 ? Infinity : Math.abs(point.x - start.x - slot.width)
+            var after = afterDistance < beforeDistance
+            var distance = Math.min(beforeDistance, afterDistance)
+            if (distance < bestDistance) {
+              bestDistance = distance
+              barDragTarget = slot
+              barDragAfter = after
+              barDragIndex = pinIndex < 0 ? root.pinned.length : pinIndex + (after ? 1 : 0)
+              var marker = screenPoint(Qt.point(start.x + (after ? slot.width : 0), start.y))
+              var thickness = Style.spacing.xs
+              barDragTargetGeometry = { x: marker.x - thickness / 2, y: marker.y,
+                width: thickness, height: slot.height }
+            }
+            // Pins stay first; the first running icon marks the end of them.
+            if (pinIndex < 0) break
+          }
+        }
+
         screen: modelData
         anchors {
           bottom: true
@@ -657,6 +739,18 @@ Item {
         surfaceFormat.opaque: false
         WlrLayershell.namespace: "omarchy-taskbar"
         WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.keyboardFocus: barDragSource ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+        onBarDragSourceChanged: if (barDragSource) dragKeys.forceActiveFocus()
+        onWidthChanged: clearBarDrag()
+        onHeightChanged: clearBarDrag()
+
+        Item {
+          id: dragKeys
+          focus: barWindow.barDragSource !== null
+          Keys.onEscapePressed: barWindow.clearBarDrag()
+        }
+
+        DragGhostPanel { bar: barWindow }
 
         DropArea {
           anchors.fill: parent
@@ -697,11 +791,13 @@ Item {
           spacing: Style.space(2)
 
           Repeater {
+            id: appButtons
             model: root.apps
 
             delegate: AppButton {
               required property var modelData
               app: modelData
+              bar: barWindow
             }
           }
         }
@@ -760,10 +856,66 @@ Item {
     }
   }
 
+  component DragGhostPanel: PanelWindow {
+    id: ghostWindow
+    required property var bar
+    readonly property var sourceItem: bar.barDragSource ? bar.barDragSource.activeItem : null
+    readonly property int ghostPadding: Style.space(1)
+
+    screen: bar.screen
+    visible: sourceItem !== null
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-taskbar-drag-ghost"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    anchors { top: true; bottom: true; left: true; right: true }
+    // Keep the pointer grab on the source icon, as in Omarchy's bar.
+    mask: Region {}
+
+    Item {
+      x: Math.round(bar.barDragScreenPoint.x - bar.barDragOffset.x - ghostWindow.ghostPadding)
+      y: Math.round(bar.barDragScreenPoint.y - bar.barDragOffset.y - ghostWindow.ghostPadding)
+      width: (ghostWindow.sourceItem ? ghostWindow.sourceItem.width : 1) + ghostWindow.ghostPadding * 2
+      height: (ghostWindow.sourceItem ? ghostWindow.sourceItem.height : 1) + ghostWindow.ghostPadding * 2
+
+      BorderSurface {
+        anchors.fill: parent
+        color: root.transparent ? "transparent" : Commons.Color.bar.background
+        borderSpec: Border.flat(root.foreground, 1)
+        radius: Math.min(Style.cornerRadius, height / 2)
+        opacity: root.transparent ? 0.45 : 0.94
+      }
+
+      Image {
+        anchors.fill: parent
+        anchors.margins: ghostWindow.ghostPadding
+        source: bar.barDragImageUrl
+        fillMode: Image.Stretch
+        smooth: true
+        opacity: 0.84
+      }
+    }
+
+    Rectangle {
+      readonly property var targetRect: bar.barDragTargetGeometry
+      visible: ghostWindow.visible && targetRect !== null
+      x: targetRect ? Math.round(targetRect.x) : 0
+      y: targetRect ? Math.round(targetRect.y) : 0
+      width: targetRect ? targetRect.width : 0
+      height: targetRect ? targetRect.height : 0
+      color: Commons.Color.accent
+      radius: Math.min(width, height) / 2
+    }
+  }
+
   component AppButton: Item {
     id: button
 
     property var app
+    required property var bar
+    readonly property var activeItem: appVisual
+    readonly property bool dragSource: bar.barDragSource === button
     readonly property var windows: root.windowsFor(app.key)
     readonly property bool running: windows.length > 0
     readonly property bool focused: windows.some(function(toplevel) { return toplevel.activated })
@@ -779,46 +931,110 @@ Item {
     width: root.barSize + Style.space(8)
     height: root.barSize
 
-    Rectangle {
+    Component.onDestruction: if (bar.barDragSource === button) bar.clearBarDrag()
+
+    BorderSurface {
+      visible: button.dragSource
       anchors.fill: parent
-      anchors.topMargin: Style.space(2)
-      anchors.bottomMargin: Style.space(2)
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
-      visible: mouse.containsMouse || menu.visible
+      anchors.margins: Style.space(1)
+      color: root.transparent ? "transparent" : Commons.Color.bar.background
+      borderSpec: Border.flat(root.foreground, 1)
+      radius: Math.min(Style.cornerRadius, height / 2)
+      opacity: root.transparent ? 0.22 : 0.32
     }
 
-    Image {
-      anchors.centerIn: parent
-      anchors.verticalCenterOffset: -1
-      width: root.iconSize
-      height: root.iconSize
-      sourceSize.width: root.iconSize * 2
-      sourceSize.height: root.iconSize * 2
-      source: root.iconFor(button.app)
-      fillMode: Image.PreserveAspectFit
-      smooth: true
-      mipmap: true
-    }
+    Item {
+      id: appVisual
+      anchors.fill: parent
+      opacity: button.dragSource ? 0.22 : 1.0
 
-    Rectangle {
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: 1
-      anchors.horizontalCenter: parent.horizontalCenter
-      height: 2
-      radius: 1
-      width: button.focused ? Style.space(12) : Style.space(4)
-      visible: button.running
-      color: button.focused ? Commons.Color.accent : root.foreground
-      Behavior on width { NumberAnimation { duration: 120 } }
+      Rectangle {
+        anchors.fill: parent
+        anchors.topMargin: Style.space(2)
+        anchors.bottomMargin: Style.space(2)
+        radius: Style.cornerRadius
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+        visible: mouse.containsMouse || menu.visible
+      }
+
+      Image {
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -1
+        width: root.iconSize
+        height: root.iconSize
+        sourceSize.width: root.iconSize * 2
+        sourceSize.height: root.iconSize * 2
+        source: root.iconFor(button.app)
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
+      }
+
+      Rectangle {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 1
+        anchors.horizontalCenter: parent.horizontalCenter
+        height: 2
+        radius: 1
+        width: button.focused ? Style.space(12) : Style.space(4)
+        visible: button.running
+        color: button.focused ? Commons.Color.accent : root.foreground
+        Behavior on width { NumberAnimation { duration: 120 } }
+      }
     }
 
     MouseArea {
       id: mouse
+      property bool dragging: false
+      property bool suppressClick: false
+      property real pressedX: 0
+      property real pressedY: 0
+      readonly property real dragThreshold: Style.space(4)
+
       anchors.fill: parent
       hoverEnabled: true
       acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+      cursorShape: dragging ? Qt.ClosedHandCursor : Qt.ArrowCursor
+      // Row owns the button's position. Move only the overlay ghost.
+      onPressed: function(event) {
+        dragging = false
+        suppressClick = false
+        pressedX = event.x
+        pressedY = event.y
+        bar.clearBarDrag()
+      }
+      onPositionChanged: function(event) {
+        if (!pressed || !(event.buttons & Qt.LeftButton) || (!root.isPinned(button.app.key) && !root.canPin(button.app))) return
+        var distance = Math.abs(event.x - pressedX) + Math.abs(event.y - pressedY)
+        if (!dragging && distance >= dragThreshold) {
+          root.closeMenu()
+          bar.barDragOffset = Qt.point(pressedX, pressedY)
+          bar.captureBarDragGhost(button)
+          bar.barDragSource = button
+          dragging = true
+        }
+        // Escape clears the source while keeping this gesture consumed.
+        if (dragging && bar.barDragSource === button) bar.updateBarDrag(button, event.x, event.y)
+      }
+      onReleased: function(event) {
+        var wasDragging = dragging
+        if (wasDragging && bar.barDragSource === button) bar.updateBarDrag(button, event.x, event.y)
+        var index = bar.barDragIndex
+        suppressClick = wasDragging
+        dragging = false
+        bar.clearBarDrag()
+        if (wasDragging && index >= 0) root.movePin(button.app, index)
+      }
+      onCanceled: {
+        dragging = false
+        suppressClick = true
+        bar.clearBarDrag()
+      }
       onClicked: function(event) {
+        if (suppressClick) {
+          suppressClick = false
+          return
+        }
         if (event.button === Qt.RightButton) {
           if (menu.visible) root.closeMenu()
           else root.showMenu(menu)
@@ -841,7 +1057,7 @@ Item {
     Timer {
       id: tipDelay
       interval: 400
-      running: mouse.containsMouse && !menu.visible && !windowList.visible
+      running: mouse.containsMouse && !mouse.dragging && !menu.visible && !windowList.visible
     }
 
     // The app's windows, each with its workspace; a click jumps to it.
@@ -913,7 +1129,7 @@ Item {
 
     PopupWindow {
       id: tip
-      visible: mouse.containsMouse && !menu.visible && !windowList.visible && !tipDelay.running
+      visible: mouse.containsMouse && !mouse.dragging && !menu.visible && !windowList.visible && !tipDelay.running
       anchor.item: button
       anchor.edges: Edges.Top
       anchor.gravity: Edges.Top

@@ -49,9 +49,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The QML runs a few `bash -c` scripts; extract and lint each one.
-      - name: ShellCheck the bash -c scripts in Taskbar.qml
-        run: python3 tests/extract_shell.py build/shell && shellcheck --severity=warning build/shell/*.sh
+      # Lint the standalone scripts and the literal `bash -c` scripts in QML.
+      - name: ShellCheck the pin script and embedded commands
+        run: python3 tests/extract_shell.py build/shell && shellcheck --severity=warning bin/*.sh build/shell/*.sh
 
   zizmor:
     name: zizmor (workflow security)

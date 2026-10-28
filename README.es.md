@@ -11,7 +11,7 @@ abiertas, siempre centradas.
 ![Omarchy Taskbar](preview.png)
 
 La barra de cerca, con apps ancladas, apps abiertas y aplicaciones web con su
-propio icono (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
+propio icono:
 
 ![La barra, oscura](assets/bar-dark.png)
 
@@ -26,7 +26,7 @@ de Omarchy:
 
 ![Con ventanas abiertas y la barra transparente](assets/screen-transparent.png)
 
-Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10: un clic muestra cada una con su escritorio, y al elegir una te lleva a ella.
+Al pulsar una app con varias ventanas, puedes elegir una miniatura para abrirla en su escritorio.
 
 ![Miniaturas de las ventanas con su escritorio](assets/window-previews.png)
 
@@ -50,7 +50,7 @@ Una app con varias ventanas, aquí tres terminales en los escritorios 8, 9 y 10:
   final de tus anclajes.
 - **Varias ventanas de una app**: un clic muestra una miniatura de cada una con su escritorio (una sola captura, solo mientras la lista está abierta); eliges una y la barra te lleva a ella, aunque esté en otro escritorio.
 - **Clic derecho**: anclar/desanclar, ventana nueva, cerrar. Ventana nueva funciona con todas las apps, también con ventanas sin entrada de escritorio (como una terminal abierta con su propia clase).
-- **El icono correcto en apps que van detrás de otro programa**: las que corren dentro de una terminal (cliamp, Voxtype, las TUI de Docker y monitores de Omarchy) y las ventanas que abre un script (la ventana FreeRDP de la máquina virtual de Windows) muestran su propio icono. Solo se leen nombres de procesos, nunca líneas de órdenes.
+- **Iconos de aplicaciones**: las apps abiertas desde una terminal o un script pueden mostrar su propio icono.
 - **Aplicaciones web** (las de `omarchy-webapp-install`): muestran su propio icono, tienen su propio botón y se pueden anclar, en vez de salir como el navegador.
 - **Doble clic en una zona vacía**: activa o quita la transparencia, igual que
   la barra de Omarchy. Las dos barras comparten el mismo ajuste
@@ -79,8 +79,8 @@ Arrastra un archivo compatible desde el gestor de archivos a cualquier barra.
 Los archivos `.desktop` instalados usan su id de entrada; los accesos que vienen
 de otro sitio se copian a tu carpeta de aplicaciones de usuario. Los programas
 y AppImages necesitan permiso de ejecución. Los archivos de Windows se abren
-con la aplicación predeterminada del sistema para su tipo MIME mediante
-`xdg-open`, incluido GE-Proton si lo tienes configurado como predeterminado.
+con la aplicación predeterminada del sistema para su tipo de archivo,
+incluido GE-Proton si lo tienes configurado como controlador.
 
 Para los archivos `.exe`, la barra extrae un icono si `wrestool` e `icotool`
 (icoutils) ya están instalados; si no, usa un icono genérico de ejecutable.
@@ -117,18 +117,17 @@ el código nuevo.
   elegido es el mínimo: la barra crece para albergar los iconos y vuelve a
   reducirse al cerrar aplicaciones, hasta el máximo de cada pantalla. Crystal
   mantiene un pequeño margen incluso en Completo. Si los iconos superan ese
-  máximo, se recorren con la rueda. No hay un modo automático separado. Los
-  menús siguen el idioma español/inglés del sistema.
+  máximo, se recorren con la rueda. Los menús siguen el idioma español/inglés
+  del sistema.
   Ejemplo: `{"style": "crystal", "scale": 0.9, "width": "20%"}`. Se conservan
   los largos en píxeles editados a mano. Elegir un valor predeterminado retira
   solo ese ajuste y conserva los demás; si el archivo queda vacío se borra.
   Si un ajuste falta o no es válido, se usa Predeterminado, 1x y largo completo.
   El doble clic para alternar la transparencia se conserva en Predeterminado
-  y sigue controlando ambas barras nativas. Las escrituras se hacen en cola
-  para conservar todas las elecciones aunque se cambien rápidamente.
+  y sigue controlando ambas barras nativas.
 - `~/.local/share/applications/omarchy-taskbar/<hash>.desktop`: accesos
   generados y copias de `.desktop` externos. El directorio es privado (`0700`)
-  y los lanzadores solo son legibles por el propietario (`0600`). Los accesos
+  y el acceso a los lanzadores se limita a tu usuario (`0600`). Los accesos
   planos existentes se mueven allí al reparar sus anclajes al iniciar.
 - `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
   iconos extraídos de archivos de Windows, cuando están disponibles.
@@ -154,7 +153,7 @@ python3 scripts/check_native_settings.py
 
 Las pruebas QML y de ajustes nativos usan Qt/Quickshell ya instalados. La prueba
 nativa de ajustes escribe solo en un directorio temporal aislado.
-Los cambios de v0.1.0 están en [CHANGELOG.md](CHANGELOG.md).
+Consulta el [historial de cambios](CHANGELOG.md).
 
 ## Licencia
 

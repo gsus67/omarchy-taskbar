@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.1 — 2026-10-28
+
+- Restrict permissions on a verified owned regular legacy launcher before
+  checking for a destination conflict. An existing private copy can no longer
+  leave a legacy copy group/other-readable. Both contents remain unchanged.
+- Add sentinel-secret regressions for both add and repair conflicts, covering
+  0644, 0640, 0444, 0600 and 0400 modes. The test reproduced the public-mode
+  failure on v0.1.0 before the fix.
+
 ## v0.1.0 — 2026-10-28
 
 ### Security

@@ -33,6 +33,8 @@ a click shows each one with its workspace, and picking one jumps there.
 ## Features
 
 - One bar along the bottom edge of every screen; windows make room for it.
+- Right-click empty space for Default or Crystal glass style, icon scale and
+  a length that grows with the icons. Full length remains the default.
 - Pinned apps first, then any other app you open, centered and growing from
   the middle.
 - A short mark under apps that have windows; the focused app gets a wider mark
@@ -109,17 +111,28 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
 
 - `~/.config/omarchy-taskbar/pinned.json`: your pinned apps (desktop entry ids,
   in order). You can edit it by hand; the bar picks up changes at once.
-- `~/.config/omarchy-taskbar/config.json`: optional settings; changes apply at
-  once. Right-click empty bar space to set `scale` to **1x** (original size,
-  default), **1.25x**, **1.5x** or **2x**. This scales the bar height and icons;
-  missing or invalid `scale` uses 1x. **1x** removes `scale`, keeping other
-  settings, and deletes the file if empty. Set `width` by hand in pixels
-  (`{"width": 960}`) or a percentage of each screen's width (`{"width": "60%"}`).
-  The bar is centered, with width clamped between twice the bar height and the
-  screen width. A missing
-  file, invalid JSON or an absent/invalid `width` keeps the full-width default.
-- `~/.local/share/applications/omarchy-taskbar-<hash>.desktop`: launchers
-  generated for dropped programs and copies of external `.desktop` files.
+- `~/.config/omarchy-taskbar/config.json`: optional appearance settings, applied
+  immediately. Right-click empty bar space to open **Style** or **Size**.
+  **Default** inherits the top bar's theme and transparency. **Crystal** adds a
+  translucent, rounded glass surface with highlights and space around its ends.
+  Crystal renders locally; backdrop blur requires compositor support and is not
+  enabled by the plugin. Under **Size → Width**, choose a scale of **0.75x**, **0.9x**,
+  **1x** (default), **1.25x**, **1.5x** or **2x**, and a length from **Full** down
+  to **10%** in ten-point steps. Both styles support scale and length. The chosen
+  length is a minimum: the bar grows to fit its icons, then shrinks back as apps
+  close, up to each screen's maximum. Crystal keeps a small margin even at Full.
+  If icons exceed that maximum, scroll over the bar to reach them. There is no
+  separate automatic mode. Menus follow the system's English/Spanish locale.
+  Example: `{"style": "crystal", "scale": 0.9, "width": "20%"}`. Hand-edited
+  pixel widths are still supported. Choosing a default removes that individual
+  setting while preserving other keys; an empty config is deleted. Invalid or
+  missing settings use Default, 1x and full length. Double-click transparency
+  remains available in Default and still controls both native bars. Preference
+  writes are serialized so rapid selections keep every choice and other keys.
+- `~/.local/share/applications/omarchy-taskbar/<hash>.desktop`: generated
+  launchers and copies of external `.desktop` files. The directory is private
+  (`0700`) and the launchers are owner-readable only (`0600`). Existing flat
+  launchers are moved into it when their pins are repaired at startup.
 - `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
   extracted Windows icons, when available.
 
@@ -128,9 +141,23 @@ clean up any remaining pins and generated files with:
 
 ```bash
 rm -rf -- ~/.config/omarchy-taskbar
-rm -f -- ~/.local/share/applications/omarchy-taskbar-*.desktop \
+rm -f -- ~/.local/share/applications/omarchy-taskbar/*.desktop \
+  ~/.local/share/applications/omarchy-taskbar-*.desktop \
   ~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-*.png
+rmdir -- ~/.local/share/applications/omarchy-taskbar 2>/dev/null || true
 ```
+
+## Development checks
+
+```bash
+python3 -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+python3 scripts/check_native_settings.py
+```
+
+The QML and native settings checks use the existing Qt/Quickshell installation.
+The native settings check writes only to an isolated temporary directory.
+See [CHANGELOG.md](CHANGELOG.md) for v0.1.0 changes.
 
 ## License
 

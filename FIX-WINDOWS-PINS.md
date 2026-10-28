@@ -32,3 +32,12 @@ y `git diff --check` correctos. ShellCheck no está instalado localmente; no se
 instaló ninguna dependencia. No había un juego abierto al consultar las
 ventanas, por lo que la agrupación de una ventana real del juego queda por
 comprobar en uso. No se lanzó el juego como parte de las pruebas.
+
+Aplicado en la máquina local: plugin instalado en la rama
+`fix/windows-file-pins-local`, commits `9348550` y `b030ec3`; fuente en
+`fix/windows-file-pins`, commits `2cfaf89` y `81f3e8b`. Se usó la recarga nativa
+`omarchy restart shell` y la shell respondió `ok` después. Los cinco anclajes
+siguen en el mismo orden y el lanzador de Cities2 ya contiene `Exec=gio open`
+con su icono original. No se observaron errores de JavaScript/carga del plugin
+en la comprobación posterior. No se modificó la máquina del primo ni se
+publicó una versión remota. La comprobación visual con el juego sigue pendiente.

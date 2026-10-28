@@ -137,8 +137,10 @@ Item {
         root.pinned = Array.isArray(list) ? list.map(String) : []
         // Upgrade only our generated Windows launchers, preserving pin order,
         // icons and the configured default handler. Serialized with unpin.
-        root.pinned.forEach(function(id) {
-          if (/^omarchy-taskbar-[0-9a-f]{16}$/.test(id)) root.queuePinChange("repair", id)
+        Qt.callLater(function() {
+          root.pinned.forEach(function(id) {
+            if (/^omarchy-taskbar-[0-9a-f]{16}$/.test(id)) root.queuePinChange("repair", id)
+          })
         })
       } catch (e) {
         root.pinned = []

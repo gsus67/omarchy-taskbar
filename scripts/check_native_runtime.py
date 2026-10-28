@@ -33,12 +33,13 @@ ShellRoot {
         onTriggered: {
             iconIndexDebounce.restart();
             root.events += 1;
-            if (root.events === 20) stop();
+            if (root.events === 20) { stop(); verifyRuntime.start(); }
         }
     }
     Timer {
-        interval: 2300
-        running: true
+        id: verifyRuntime
+        interval: 1700
+        running: false
         onTriggered: {
             if (root.events !== 20 || root.scans !== 1) {
                 console.error("Expected one icon scan after the burst and no idle polling; got", root.events, root.scans);
@@ -48,6 +49,11 @@ ShellRoot {
             console.log("TASKBAR_NATIVE_RUNTIME_OK");
             Qt.quit();
         }
+    }
+    Timer {
+        interval: 6000
+        running: true
+        onTriggered: { console.error("Runtime regression check timed out"); Qt.exit(1); }
     }
 REFRESH
 DEBOUNCE

@@ -18,16 +18,19 @@ secure_applications_dir() {
   chmod 700 -- "$private_applications"
 }
 
-# Flat and nested paths have the same desktop id. Never leave duplicates or
-# replace a conflicting entry during migration. The private directory supplies
-# the confidentiality boundary; strip only group/other permissions on legacy
-# files so even owner-read-only launchers keep their original owner mode.
+# Flat and nested paths have the same desktop id. Restrict a verified legacy
+# file before checking migration preconditions, including a destination conflict.
+# Both contents stay intact on conflict; only group/other permissions are removed
+# so even owner-read-only launchers retain their original owner mode.
 migrate_legacy_pin() {
   local legacy=$applications/$1.desktop entry=$private_applications/${1#omarchy-taskbar-}.desktop
   [[ -e $legacy || -L $legacy ]] || return 0
-  [[ -f $legacy && ! -L $legacy && -O $legacy && ! -e $entry && ! -L $entry ]] || return 1
+  [[ -f $legacy && ! -L $legacy && -O $legacy ]] || return 1
+  chmod go-rwx -- "$legacy" || return 1
+  [[ ! -e $entry && ! -L $entry ]] || return 1
   secure_applications_dir || return 1
-  chmod go-rwx -- "$legacy" && mv -T -- "$legacy" "$entry"
+  mv -nT -- "$legacy" "$entry" || return 1
+  [[ ! -e $legacy && ! -L $legacy ]]
 }
 
 # Quote one Exec argument, then apply the desktop file's string escaping.
@@ -132,8 +135,8 @@ add_pin() (
 
   hash=$(printf '%s' "$path" | sha256sum) || return 0
   id=omarchy-taskbar-${hash:0:16}
-  secure_applications_dir || return 0
   migrate_legacy_pin "$id" || return 0
+  secure_applications_dir || return 0
   entry=$(mktemp "$private_applications/.omarchy-taskbar-XXXXXX") || return 0
   trap 'rm -f -- "$entry"' EXIT
   if [[ $kind == *.desktop ]]; then

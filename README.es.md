@@ -105,19 +105,31 @@ el código nuevo.
 - `~/.config/omarchy-taskbar/pinned.json`: tus apps ancladas (ids de los
   accesos, en orden). Puedes editarlo a mano; la barra recoge los cambios al
   momento.
-- `~/.config/omarchy-taskbar/config.json`: ajustes opcionales; los cambios se
-  aplican al momento. Haz clic derecho en un espacio vacío de la barra para poner
-  `scale` en **1x** (tamaño original y predeterminado), **1.25x**, **1.5x** o
-  **2x**. Esto escala la altura de la barra y los iconos; si `scale` falta o no
-  es válido, se usa 1x. **1x** elimina `scale`, conserva los demás ajustes y
-  borra el archivo si queda vacío. Edita `width` a mano en píxeles
-  (`{"width": 960}`) o como porcentaje del ancho de cada pantalla
-  (`{"width": "60%"}`). La barra queda centrada, con el ancho limitado entre el
-  doble de su altura y el ancho de la pantalla. Si falta el archivo, el JSON no
-  es válido o `width` falta o no es válido, se mantiene el ancho completo.
-- `~/.local/share/applications/omarchy-taskbar-<hash>.desktop`: accesos
-  generados para los programas arrastrados y copias de archivos `.desktop`
-  externos.
+- `~/.config/omarchy-taskbar/config.json`: ajustes opcionales de apariencia,
+  aplicados al momento. El clic derecho en un espacio vacío abre **Estilo** y
+  **Tamaño**. **Predeterminado** hereda el tema y la transparencia de la barra
+  superior. **Crystal** añade una superficie translúcida y redondeada con
+  reflejos y espacio en los extremos. Se dibuja localmente; el desenfoque del
+  fondo requiere soporte del compositor y el plugin no lo activa.
+  En **Tamaño → Ancho** se elige **0,75x**, **0,9x**, **1x** (predeterminado),
+  **1,25x**, **1,5x** o **2x**. En **Largo**, desde **Completo** hasta **10%**,
+  de diez en diez puntos. Ambas opciones están en los dos estilos. El largo
+  elegido es el mínimo: la barra crece para albergar los iconos y vuelve a
+  reducirse al cerrar aplicaciones, hasta el máximo de cada pantalla. Crystal
+  mantiene un pequeño margen incluso en Completo. Si los iconos superan ese
+  máximo, se recorren con la rueda. No hay un modo automático separado. Los
+  menús siguen el idioma español/inglés del sistema.
+  Ejemplo: `{"style": "crystal", "scale": 0.9, "width": "20%"}`. Se conservan
+  los largos en píxeles editados a mano. Elegir un valor predeterminado retira
+  solo ese ajuste y conserva los demás; si el archivo queda vacío se borra.
+  Si un ajuste falta o no es válido, se usa Predeterminado, 1x y largo completo.
+  El doble clic para alternar la transparencia se conserva en Predeterminado
+  y sigue controlando ambas barras nativas. Las escrituras se hacen en cola
+  para conservar todas las elecciones aunque se cambien rápidamente.
+- `~/.local/share/applications/omarchy-taskbar/<hash>.desktop`: accesos
+  generados y copias de `.desktop` externos. El directorio es privado (`0700`)
+  y los lanzadores solo son legibles por el propietario (`0600`). Los accesos
+  planos existentes se mueven allí al reparar sus anclajes al iniciar.
 - `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
   iconos extraídos de archivos de Windows, cuando están disponibles.
 
@@ -126,9 +138,23 @@ plugin, borra los anclajes y archivos generados que queden con:
 
 ```bash
 rm -rf -- ~/.config/omarchy-taskbar
-rm -f -- ~/.local/share/applications/omarchy-taskbar-*.desktop \
+rm -f -- ~/.local/share/applications/omarchy-taskbar/*.desktop \
+  ~/.local/share/applications/omarchy-taskbar-*.desktop \
   ~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-*.png
+rmdir -- ~/.local/share/applications/omarchy-taskbar 2>/dev/null || true
 ```
+
+## Comprobaciones de desarrollo
+
+```bash
+python3 -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+python3 scripts/check_native_settings.py
+```
+
+Las pruebas QML y de ajustes nativos usan Qt/Quickshell ya instalados. La prueba
+nativa de ajustes escribe solo en un directorio temporal aislado.
+Los cambios de v0.1.0 están en [CHANGELOG.md](CHANGELOG.md).
 
 ## Licencia
 

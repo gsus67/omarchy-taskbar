@@ -6,7 +6,29 @@ set -euo pipefail
 exec 2>/dev/null
 
 applications=$HOME/.local/share/applications
+private_applications=$applications/omarchy-taskbar
 icons=$HOME/.local/share/icons/hicolor/256x256/apps
+
+# DesktopEntries scans application subdirectories and maps their names into
+# the desktop-entry id, so this keeps omarchy-taskbar-<hash> stable.
+secure_applications_dir() {
+  [[ ! -L $private_applications ]] || return 1
+  mkdir -p -- "$private_applications" || return 1
+  [[ -d $private_applications && ! -L $private_applications && -O $private_applications ]] || return 1
+  chmod 700 -- "$private_applications"
+}
+
+# Flat and nested paths have the same desktop id. Never leave duplicates or
+# replace a conflicting entry during migration. The private directory supplies
+# the confidentiality boundary; strip only group/other permissions on legacy
+# files so even owner-read-only launchers keep their original owner mode.
+migrate_legacy_pin() {
+  local legacy=$applications/$1.desktop entry=$private_applications/${1#omarchy-taskbar-}.desktop
+  [[ -e $legacy || -L $legacy ]] || return 0
+  [[ -f $legacy && ! -L $legacy && -O $legacy && ! -e $entry && ! -L $entry ]] || return 1
+  secure_applications_dir || return 1
+  chmod go-rwx -- "$legacy" && mv -T -- "$legacy" "$entry"
+}
 
 # Quote one Exec argument, then apply the desktop file's string escaping.
 desktop_exec_arg() {
@@ -110,20 +132,25 @@ add_pin() (
 
   hash=$(printf '%s' "$path" | sha256sum) || return 0
   id=omarchy-taskbar-${hash:0:16}
-  mkdir -p -- "$applications" || return 0
-  entry=$(mktemp "$applications/.omarchy-taskbar-XXXXXX") || return 0
+  secure_applications_dir || return 0
+  migrate_legacy_pin "$id" || return 0
+  entry=$(mktemp "$private_applications/.omarchy-taskbar-XXXXXX") || return 0
   trap 'rm -f -- "$entry"' EXIT
   if [[ $kind == *.desktop ]]; then
     cp -- "$path" "$entry" || return 0
   else
     write_launcher "$path" "$id" "$kind" > "$entry" || return 0
   fi
-  chmod 644 -- "$entry" && mv -f -- "$entry" "$applications/$id.desktop" || return 0
+  chmod 600 -- "$entry" || return 0
+  mv -fT -- "$entry" "$private_applications/${id#omarchy-taskbar-}.desktop" || return 0
   printf '%s\n' "$id"
 )
 
 remove_pin() {
   [[ $1 =~ ^omarchy-taskbar-[0-9a-f]{16}$ ]] || return 0
+  if [[ -d $private_applications && ! -L $private_applications && -O $private_applications ]]; then
+    rm -f -- "$private_applications/${1#omarchy-taskbar-}.desktop" || return 0
+  fi
   rm -f -- "$applications/$1.desktop" "$icons/$1.png" || return 0
 }
 
@@ -131,8 +158,10 @@ repair_pin() (
   local id=$1 entry tmp line changed=false
   local -a lines=()
   [[ $id =~ ^omarchy-taskbar-[0-9a-f]{16}$ ]] || return 0
-  entry=$applications/$id.desktop
+  entry=$private_applications/${id#omarchy-taskbar-}.desktop
+  migrate_legacy_pin "$id" || return 0
   [[ -f $entry && ! -L $entry ]] || return 0
+  secure_applications_dir || return 0
   while IFS= read -r line || [[ -n $line ]]; do
     if [[ $line == 'Exec=xdg-open "'* && ( ${line,,} == *'.exe"' || ${line,,} == *'.msi"' ) ]]; then
       line="Exec=gio open ${line#Exec=xdg-open }"
@@ -141,10 +170,11 @@ repair_pin() (
     lines+=("$line")
   done < "$entry"
   [[ $changed == true ]] || return 0
-  tmp=$(mktemp "$applications/.omarchy-taskbar-XXXXXX") || return 0
+  secure_applications_dir || return 0
+  tmp=$(mktemp "$private_applications/.omarchy-taskbar-XXXXXX") || return 0
   trap 'rm -f -- "$tmp"' EXIT
   printf '%s\n' "${lines[@]}" > "$tmp"
-  chmod 644 -- "$tmp" && mv -f -- "$tmp" "$entry"
+  chmod --reference="$entry" -- "$tmp" && mv -fT -- "$tmp" "$entry"
 )
 
 [[ $# == 3 ]] || exit 0

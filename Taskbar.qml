@@ -6,6 +6,7 @@ import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "." as Local
 
 // A second bar along the bottom edge of every screen, built from the same
 // theme tokens as Omarchy's own bar (size, colors, font, transparency).
@@ -34,6 +35,10 @@ Item {
   property bool transparent: false
   property var configuredWidth: null
   property real configuredScale: 1
+  property string configuredStyle: "default"
+  property var configSnapshot: null
+  property var configWrites: []
+  readonly property bool crystal: configuredStyle === "crystal"
 
   // The one right-click menu open, if any. Opening another or clicking the
   // bar closes it.
@@ -74,8 +79,8 @@ Item {
 
   // ------------------------------------------------------------ bar size
 
-  // Optional settings. Missing or invalid config keeps the
-  // full-width bar; each screen resolves percentages against its own width.
+  // Optional settings. Defaults follow the native bar. Each screen resolves
+  // the selected minimum length, growing to fit icons up to its own maximum.
   FileView {
     id: configFile
     path: root.configHome + "/omarchy-taskbar/config.json"
@@ -85,42 +90,102 @@ Item {
     onLoaded: {
       try {
         var config = JSON.parse(text())
-        root.configuredWidth = config && typeof config === "object" && !Array.isArray(config) ? config.width : null
+        root.configuredWidth = config && typeof config === "object" && !Array.isArray(config) && config.width !== undefined ? config.width : null
         root.configuredScale = root.scaleFor(config && config.scale)
+        root.configuredStyle = root.styleFor(config && config.style)
+        if (!configWriter.running && root.configWrites.length === 0)
+          root.configSnapshot = config && typeof config === "object" && !Array.isArray(config) ? config : ({})
       } catch (e) {
         root.configuredWidth = null
         root.configuredScale = 1
+        root.configuredStyle = "default"
+        if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = ({})
       }
     }
     onLoadFailed: {
       root.configuredWidth = null
       root.configuredScale = 1
+      root.configuredStyle = "default"
+      if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = ({})
     }
   }
 
-  function scaleFor(value) { return [1, 1.25, 1.5, 2].indexOf(value) !== -1 ? value : 1 }
+  function scaleFor(value) { return [0.75, 0.9, 1, 1.25, 1.5, 2].indexOf(value) !== -1 ? value : 1 }
+  function styleFor(value) { return value === "crystal" ? "crystal" : "default" }
 
-  function widthFor(value, screenWidth, barSize) {
+  function widthFor(value, screenWidth, barSize, crystal, contentWidth) {
+    var maximum = Math.max(1, screenWidth - (crystal ? Math.round(barSize * 0.8) : 0))
+    var minimum = Math.min(maximum, Math.max(barSize * 2, contentWidth || 0))
     var width = typeof value === "number" ? value : NaN
     if (typeof value === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$/.test(value.trim()))
-      width = screenWidth * (parseFloat(value) / 100)
-    if (!isFinite(width)) return screenWidth
-    return Math.min(screenWidth, Math.max(barSize * 2, Math.round(width)))
+      width = maximum * (parseFloat(value) / 100)
+    if (!isFinite(width)) return maximum
+    return Math.min(maximum, Math.max(minimum, Math.round(width)))
+  }
+
+  function barMenuItems(page) {
+    var back = { label: "‹ " + t("Back", "Volver"), page: page === "scale" || page === "length" ? "size" : "root" }
+    if (page === "style") return [back,
+      { label: t("Default", "Predeterminado"), key: "style", value: null, checked: configuredStyle === "default" },
+      { label: "Crystal", key: "style", value: "crystal", checked: crystal }]
+    if (page === "size") return [back,
+      { label: t("Length", "Largo") + "  ›", page: "length" },
+      { label: t("Width", "Ancho") + "  ›", page: "scale" }]
+    if (page === "scale") return [back].concat([0.75, 0.9, 1, 1.25, 1.5, 2].map(function(scale) {
+      return { label: String(scale).replace(".", Qt.locale().decimalPoint) + "x",
+        key: "scale", value: scale === 1 ? null : scale, checked: configuredScale === scale }
+    }))
+    if (page === "length") return [back].concat([100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map(function(length) {
+      return { label: length === 100 ? t("Full", "Completo") : length + "%",
+        key: "width", value: length === 100 ? null : length + "%",
+        checked: length === 100 ? configuredWidth === null || configuredWidth === "100%" : configuredWidth === length + "%" }
+    }))
+    return [{ label: t("Style", "Estilo") + "  ›", page: "style" },
+      { label: t("Size", "Tamaño") + "  ›", page: "size" }]
   }
 
   function saveConfig(key, value) {
+    if (key !== "style" && key !== "scale" && key !== "width") return
+    if (key === "style" && value !== null && value !== "crystal") return
+    if (key === "scale" && value !== null && root.scaleFor(value) !== value) return
+    if (key === "width" && value !== null && ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"].indexOf(value) === -1) return
     var config = {}
     try {
-      var parsed = JSON.parse(configFile.text())
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) config = parsed
+      var parsed = root.configSnapshot === null ? JSON.parse(configFile.text()) : root.configSnapshot
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) config = Object.assign(Object.create(null), parsed)
     } catch (e) {}
     if (value === null) delete config[key]
     else config[key] = value
-    Quickshell.execDetached(["bash", "-c",
+    root.configSnapshot = config
+    root.configWrites = root.configWrites.concat([Object.keys(config).length ? JSON.stringify(config, null, 2) : ""])
+    root.writeNextConfig()
+  }
+
+  function writeNextConfig() {
+    if (configWriter.running || root.configWrites.length === 0) return
+    configWriter.payload = root.configWrites[0]
+    root.configWrites = root.configWrites.slice(1)
+    configWriter.running = true
+  }
+
+  // Serialize atomic writes. The next choice builds on the pending snapshot,
+  // so fast menu selections cannot overwrite one another with stale FileView data.
+  Process {
+    id: configWriter
+    property string payload: ""
+    command: ["bash", "-c",
       'if [[ -z $2 ]]; then rm -f -- "$1"; else '
       + 'mkdir -p -- "${1%/*}" || exit; tmp=$(mktemp -- "$1.XXXXXX") || exit; '
       + 'trap \'rm -f -- "$tmp"\' EXIT; printf "%s\\n" "$2" >"$tmp" && mv -f -- "$tmp" "$1"; fi',
-      "omarchy-taskbar", configFile.path, Object.keys(config).length ? JSON.stringify(config, null, 2) : ""])
+      "omarchy-taskbar", configFile.path, payload]
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0 || exitStatus !== 0) {
+        root.configWrites = []
+        root.configSnapshot = null
+        console.warn("Taskbar: could not save appearance settings")
+      } else root.writeNextConfig()
+      if (!configWriter.running) configFile.reload()
+    }
   }
 
   // ------------------------------------------------------------ pinned apps
@@ -686,7 +751,8 @@ Item {
       PanelWindow {
         id: barWindow
         required property var modelData
-        readonly property int targetWidth: root.widthFor(root.configuredWidth, modelData.width, root.barSize)
+        readonly property int targetWidth: root.widthFor(root.configuredWidth, modelData.width, root.barSize, root.crystal,
+          appRow.implicitWidth + (root.crystal ? Style.space(20) : 0))
 
         // Reuse Omarchy's Bar.qml drag threshold, captured ghost and marker.
         // Each screen owns its gesture; only the saved pins are shared.
@@ -719,7 +785,7 @@ Item {
         }
 
         function screenPoint(point) {
-          return Qt.point(point.x + margins.left, point.y + screen.height - height)
+          return Qt.point(point.x + margins.left, point.y + screen.height - height - margins.bottom)
         }
 
         function updateBarDrag(button, x, y) {
@@ -767,14 +833,21 @@ Item {
         // Keep three anchors so Auto still reserves the bar's height.
         margins.left: Math.floor((modelData.width - targetWidth) / 2)
         margins.right: Math.ceil((modelData.width - targetWidth) / 2)
+        margins.bottom: root.crystal ? Style.space(8) : 0
         implicitHeight: root.barSize
         exclusionMode: ExclusionMode.Auto
-        color: root.transparent ? "transparent" : Commons.Color.bar.background
+        color: root.crystal || root.transparent ? "transparent" : Commons.Color.bar.background
         surfaceFormat.opaque: false
         WlrLayershell.namespace: "omarchy-taskbar"
         WlrLayershell.layer: WlrLayer.Top
         onWidthChanged: clearBarDrag()
         onHeightChanged: clearBarDrag()
+
+        Local.CrystalSurface {
+          anchors.fill: parent
+          visible: root.crystal
+          tint: Commons.Color.bar.background
+        }
 
         DragGhostPanel { bar: barWindow }
 
@@ -794,42 +867,77 @@ Item {
           }
         }
 
-        // Empty bar space: size menu and double-click transparency.
+        // Empty bar space: appearance menu and double-click transparency.
         MouseArea {
           anchors.fill: parent
           acceptedButtons: Qt.LeftButton | Qt.RightButton
           onPressed: root.closeMenu()
           onClicked: function(event) {
             if (event.button === Qt.RightButton) {
-              sizeMenu.anchor.rect.x = event.x
-              sizeMenu.anchor.rect.y = event.y
-              root.showMenu(sizeMenu)
+              barMenu.anchor.rect.x = event.x
+              barMenu.anchor.rect.y = event.y
+              root.showMenu(barMenu)
             }
           }
           onDoubleClicked: function(event) {
-            if (event.button === Qt.LeftButton) root.toggleTransparent()
+            if (event.button === Qt.LeftButton && !root.crystal) root.toggleTransparent()
           }
         }
 
-        Row {
-          anchors.centerIn: parent
-          height: parent.height
-          spacing: Style.space(2)
+        Flickable {
+          id: appViewport
+          anchors.fill: parent
+          anchors.leftMargin: root.crystal ? Style.space(10) : 0
+          anchors.rightMargin: anchors.leftMargin
+          contentWidth: Math.max(width, appRow.width)
+          contentHeight: height
+          interactive: false
+          clip: true
+          onWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
+          onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
 
-          Repeater {
-            id: appButtons
-            model: root.apps
+          WheelHandler {
+            target: null
+            onWheel: function(event) {
+              if (appViewport.contentWidth <= appViewport.width) { event.accepted = false; return }
+              var delta = event.pixelDelta.x || event.pixelDelta.y || (event.angleDelta.x || event.angleDelta.y) / 120 * root.barSize * 2
+              appViewport.contentX = Math.max(0, Math.min(appViewport.contentWidth - appViewport.width, appViewport.contentX - delta))
+              event.accepted = true
+            }
+          }
 
-            delegate: AppButton {
-              required property var modelData
-              app: modelData
-              bar: barWindow
+          Row {
+            id: appRow
+            x: Math.max(0, (appViewport.width - width) / 2)
+            height: appViewport.height
+            spacing: Style.space(2)
+
+            Repeater {
+              id: appButtons
+              model: root.apps
+
+              delegate: AppButton {
+                required property var modelData
+                app: modelData
+                bar: barWindow
+              }
             }
           }
         }
 
         PopupWindow {
-          id: sizeMenu
+          id: barMenu
+          property string page: "root"
+          property int currentIndex: 0
+          readonly property var items: root.barMenuItems(page)
+          onPageChanged: currentIndex = 0
+          function activate(index) {
+            var item = items[index]
+            if (!item) return
+            if (item.page !== undefined) { page = item.page; return }
+            root.closeMenu()
+            root.saveConfig(item.key, item.value)
+          }
           visible: false
           anchor.window: barWindow
           anchor.rect.width: 1
@@ -837,45 +945,58 @@ Item {
           anchor.edges: Edges.Top
           anchor.gravity: Edges.Top
           anchor.margins.top: -Style.space(4)
-          implicitWidth: sizeColumn.implicitWidth + Style.space(8)
-          implicitHeight: sizeColumn.implicitHeight + Style.space(8)
+          implicitWidth: Style.space(238)
+          implicitHeight: settingsColumn.implicitHeight + Style.space(8)
           color: "transparent"
 
           Rectangle {
             anchors.fill: parent
             focus: true
             Keys.onEscapePressed: root.closeMenu()
+            Keys.onUpPressed: barMenu.currentIndex = (barMenu.currentIndex + barMenu.items.length - 1) % barMenu.items.length
+            Keys.onDownPressed: barMenu.currentIndex = (barMenu.currentIndex + 1) % barMenu.items.length
+            Keys.onReturnPressed: barMenu.activate(barMenu.currentIndex)
+            Keys.onEnterPressed: barMenu.activate(barMenu.currentIndex)
+            Keys.onLeftPressed: { if (barMenu.page !== "root") barMenu.activate(0) }
+            Keys.onRightPressed: { if (barMenu.items[barMenu.currentIndex].page !== undefined) barMenu.activate(barMenu.currentIndex) }
             color: Commons.Color.menu.background
             border.color: Commons.Color.menu.border
             border.width: Style.normalBorderWidth
             radius: Style.cornerRadius
 
             Column {
-              id: sizeColumn
+              id: settingsColumn
               anchors.centerIn: parent
 
               Repeater {
-                model: [1, 1.25, 1.5, 2]
+                model: barMenu.items
                 delegate: MenuRow {
                   required property var modelData
-                  text: modelData + "x"
-                  checkable: true
-                  checked: root.configuredScale === modelData
-                  onTriggered: { root.closeMenu(); root.saveConfig("scale", modelData === 1 ? null : modelData) }
+                  required property int index
+                  width: barMenu.implicitWidth - Style.space(8)
+                  text: modelData.label
+                  checkable: modelData.key !== undefined
+                  checked: modelData.checked === true
+                  highlighted: barMenu.currentIndex === index
+                  onHovered: barMenu.currentIndex = index
+                  onTriggered: barMenu.activate(index)
                 }
               }
             }
           }
 
           onVisibleChanged: {
-            if (visible) Qt.callLater(function() { sizeGrab.active = sizeMenu.visible })
-            else sizeGrab.active = false
+            if (visible) {
+              page = "root"
+              currentIndex = 0
+              Qt.callLater(function() { settingsGrab.active = barMenu.visible })
+            } else settingsGrab.active = false
           }
 
           HyprlandFocusGrab {
-            id: sizeGrab
-            windows: [sizeMenu, barWindow]
-            onCleared: if (root.openMenu === sizeMenu) root.closeMenu()
+            id: settingsGrab
+            windows: [barMenu, barWindow]
+            onCleared: if (root.openMenu === barMenu) root.closeMenu()
           }
         }
       }
@@ -1377,14 +1498,16 @@ Item {
     property bool shown: true
     property bool checkable: false
     property bool checked: false
+    property bool highlighted: false
     readonly property int checkWidth: checkable ? Style.space(20) : 0
     signal triggered()
+    signal hovered()
 
     visible: shown
     width: Math.max(Style.space(140), rowLabel.implicitWidth + Style.space(24) + checkWidth)
     height: shown ? rowLabel.implicitHeight + Style.space(12) : 0
     radius: Style.cornerRadius
-    color: rowMouse.containsMouse ? Commons.Color.menu.selectedBackground : "transparent"
+    color: (row.highlighted || rowMouse.containsMouse) ? Commons.Color.menu.selectedBackground : "transparent"
 
     Text {
       textFormat: Text.PlainText
@@ -1405,7 +1528,7 @@ Item {
       anchors.left: parent.left
       anchors.leftMargin: Style.space(12) + row.checkWidth
       text: row.text
-      color: rowMouse.containsMouse ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+      color: (row.highlighted || rowMouse.containsMouse) ? Commons.Color.menu.selectedText : Commons.Color.menu.text
       font.family: Style.font.family
       font.pixelSize: Style.font.body
     }
@@ -1414,6 +1537,7 @@ Item {
       id: rowMouse
       anchors.fill: parent
       hoverEnabled: true
+      onEntered: row.hovered()
       onClicked: row.triggered()
     }
   }

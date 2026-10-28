@@ -14,3 +14,15 @@ Every change runs, in CI:
 - ShellCheck on standalone scripts and each embedded `bash -c` script;
 - CodeQL `security-extended` analysis and zizmor for the workflows;
 - OpenSSF Scorecard (weekly and on `main`) for the repository's practices.
+
+Generated launchers are stored under the plugin-owned
+`~/.local/share/applications/omarchy-taskbar/` directory with mode `0700`.
+New launcher files use `0600`; repair retains the existing file mode. Legacy
+migration removes group/other permissions and retains the owner's bits. The
+standard applications directory and other user-owned files are not chmodded.
+The original dropped launcher is not modified. Pinning does not execute it.
+
+Appearance choices use fixed values and the existing atomic configuration
+writer, with serialized writes. Crystal is rendered locally; it does not
+activate the compositor's blur engine or add privileges, packages, background
+services, network requests or compositor configuration files.

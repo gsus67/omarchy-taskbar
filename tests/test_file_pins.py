@@ -22,6 +22,7 @@ class FilePinTest(unittest.TestCase):
         self.base = Path(self.directory.name)
         self.home = self.base / "home"
         self.applications = self.home / ".local/share/applications"
+        self.private_applications = self.applications / "omarchy-taskbar"
         self.icons = self.home / ".local/share/icons/hicolor/256x256/apps"
         self.bin = self.base / "bin"
         self.bin.mkdir()
@@ -51,6 +52,9 @@ class FilePinTest(unittest.TestCase):
         return path
 
     def entry(self, key):
+        return self.private_applications / (key.removeprefix("omarchy-taskbar-") + ".desktop")
+
+    def legacy_entry(self, key):
         return self.applications / (key + ".desktop")
 
     def test_exec_argument_escaping(self):
@@ -81,8 +85,10 @@ class FilePinTest(unittest.TestCase):
                 self.assertIn(f'Name={path.stem}\n', text)
                 self.assertIn("Icon=application-x-executable\n", text)
                 self.assertEqual(self.run_script("add", path), key)
-        self.assertEqual(len(list(self.applications.glob("*.desktop"))), 2)
+        self.assertEqual(len(list(self.private_applications.glob("*.desktop"))), 2)
         self.assertFalse(self.icons.exists())
+        for entry in self.private_applications.glob("*.desktop"):
+            self.assertEqual(entry.stat().st_mode & 0o777, 0o600)
 
     def test_executable_and_appimage_run_directly(self):
         for name in ("program", "Program.AppImage"):
@@ -199,6 +205,86 @@ class FilePinTest(unittest.TestCase):
                 self.assertEqual(set(self.applications.glob("*")), before)
                 self.assertEqual(path.read_text(), DESKTOP)
 
+    def test_private_external_desktop_stays_private_when_copied(self):
+        sentinel = "REMOTE_PASSWORD=sentinel-secret"
+        path = self.file("private.desktop", DESKTOP.replace("Exec=/bin/true", "Exec=/bin/true " + sentinel))
+        path.chmod(0o600)
+        key = self.run_script("add", path)
+        imported = self.entry(key)
+        self.assertEqual(imported.read_text(), path.read_text())
+        self.assertIn(sentinel, imported.read_text())
+        self.assertEqual(imported.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.private_applications.stat().st_mode & 0o777, 0o700)
+
+    def test_repair_preserves_restrictive_launcher_permissions(self):
+        path = self.file("Game.exe")
+        key = self.run_script("add", path)
+        entry = self.entry(key)
+        entry.write_text(entry.read_text().replace("Exec=gio open ", "Exec=xdg-open "))
+        entry.chmod(0o600)
+        self.private_applications.chmod(0o755)
+        self.assertEqual(self.run_script("repair", key), "")
+        self.assertIn("Exec=gio open ", entry.read_text())
+        self.assertEqual(entry.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.private_applications.stat().st_mode & 0o777, 0o700)
+
+    def test_legacy_launcher_is_migrated_into_private_directory_on_repair(self):
+        path = self.file("Game.exe")
+        key = self.run_script("add", path)
+        private_entry = self.entry(key)
+        legacy = self.legacy_entry(key)
+        legacy.write_text(private_entry.read_text().replace("Exec=gio open ", "Exec=xdg-open "))
+        legacy.chmod(0o644)
+        private_entry.unlink()
+
+        self.assertEqual(self.run_script("repair", key), "")
+        self.assertFalse(legacy.exists())
+        self.assertIn("Exec=gio open ", private_entry.read_text())
+        self.assertEqual(private_entry.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.private_applications.stat().st_mode & 0o777, 0o700)
+
+    def test_repair_preserves_owner_read_only_legacy_launchers(self):
+        key = "omarchy-taskbar-0123456789abcdef"
+        old = DESKTOP.replace("Exec=/bin/true", 'Exec=xdg-open "/tmp/Game.exe"')
+        legacy = self.file(key + ".desktop", old, parent=self.applications)
+        legacy.chmod(0o400)
+        self.run_script("repair", key)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(self.entry(key).stat().st_mode & 0o777, 0o400)
+        self.assertIn('Exec=gio open "/tmp/Game.exe"', self.entry(key).read_text())
+
+    def test_repinning_legacy_source_keeps_one_desktop_id(self):
+        path = self.file("external.desktop", DESKTOP)
+        key = "omarchy-taskbar-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        legacy = self.file(key + ".desktop", DESKTOP, parent=self.applications)
+        self.assertEqual(self.run_script("add", path, [key]), key)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(self.entry(key).read_text(), DESKTOP)
+        self.assertEqual(self.entry(key).stat().st_mode & 0o777, 0o600)
+
+    def test_conflicting_legacy_and_private_entries_are_not_overwritten(self):
+        path = self.file("Game.exe")
+        key = self.run_script("add", path)
+        current = self.entry(key).read_text()
+        legacy = self.file(key + ".desktop", DESKTOP, parent=self.applications)
+        self.assertEqual(self.run_script("add", path), "")
+        self.run_script("repair", key)
+        self.assertEqual(legacy.read_text(), DESKTOP)
+        self.assertEqual(self.entry(key).read_text(), current)
+
+    def test_private_directory_symlink_is_not_followed(self):
+        external = self.base / "external-applications"
+        external.mkdir()
+        key = "omarchy-taskbar-0123456789abcdef"
+        protected = self.file("0123456789abcdef.desktop", DESKTOP, parent=external)
+        self.applications.mkdir(parents=True)
+        self.private_applications.symlink_to(external, target_is_directory=True)
+        self.assertEqual(self.run_script("add", self.file("Game.exe")), "")
+        self.run_script("repair", key)
+        self.run_script("remove", key)
+        self.assertEqual(protected.read_text(), DESKTOP)
+        self.assertEqual(list(external.iterdir()), [protected])
+
     def test_external_desktop_is_copied_and_its_copy_is_reused(self):
         path = self.file("external.desktop", DESKTOP)
         key = self.run_script("add", path)
@@ -305,7 +391,8 @@ class FilePinTest(unittest.TestCase):
         (self.bin / "mv").unlink()
         self.file("mv", "#!/bin/bash\nexit 1\n", executable=True, parent=self.bin)
         self.assertEqual(self.run_script("add", path), "")
-        self.assertEqual(list(self.applications.iterdir()), [])
+        self.assertEqual(list(self.private_applications.iterdir()), [])
+        self.assertEqual(self.private_applications.stat().st_mode & 0o777, 0o700)
 
 
 if __name__ == "__main__":

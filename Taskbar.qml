@@ -135,6 +135,13 @@ Item {
       try {
         var list = JSON.parse(text())
         root.pinned = Array.isArray(list) ? list.map(String) : []
+        // Upgrade only our generated Windows launchers, preserving pin order,
+        // icons and the configured default handler. Serialized with unpin.
+        Qt.callLater(function() {
+          root.pinned.forEach(function(id) {
+            if (/^omarchy-taskbar-[0-9a-f]{16}$/.test(id)) root.queuePinChange("repair", id)
+          })
+        })
       } catch (e) {
         root.pinned = []
       }
@@ -357,23 +364,50 @@ Item {
   function lookupFor(toplevel) {
     var appId = String(toplevel.appId || "")
     // Terminals too: each window may be running a different app.
-    if (appId.indexOf("TUI.") !== 0 && !isTerminal(entryFor(appId))) return appId
+    // Wine's generic classes can also belong to different executables.
+    var wine = /(^wine(?:64)?$|\.exe$)/i.test(appId)
+    if (!wine && appId.indexOf("TUI.") !== 0 && !isTerminal(entryFor(appId))) return appId
     var hypr = hyprlandOf(toplevel)
     var address = hypr ? String(hypr.address) : ""
     if (address !== "" && !/^0x/.test(address)) address = "0x" + address
     return /^0x[0-9a-fA-F]+$/.test(address) ? "@" + address : appId
   }
 
+  // Generated file launchers run a MIME opener, not the Windows program
+  // itself. Match its exact basename (or explicit startup class) instead.
+  // Never guess between two pinned files with the same Windows identity.
+  function windowsEntryFor(appId) {
+    var name = String(appId || "").toLowerCase()
+    if (name === "") return null
+    var match = null
+    for (var i = 0; i < root.pinned.length; i++) {
+      var id = root.pinned[i]
+      if (!/^omarchy-taskbar-[0-9a-f]{16}$/.test(id)) continue
+      var entry = DesktopEntries.byId(id)
+      if (!entry) continue
+      var words = (entry.command || []).map(String)
+      var path = words.length === 2 && words[0] === "xdg-open" ? words[1]
+        : words.length === 3 && words[0] === "gio" && words[1] === "open" ? words[2] : ""
+      if (!/\.exe$/i.test(path)) continue
+      var base = path.split("/").pop().toLowerCase()
+      var startup = String(entry.startupClass || "").toLowerCase()
+      if (name !== base && (startup === "" || name !== startup)) continue
+      if (match && match.id !== entry.id) return null
+      match = entry
+    }
+    return match
+  }
+
   function entryFor(appId) {
     if (!appId) return null
-    return webAppEntry(appId) || DesktopEntries.heuristicLookup(appId)
+    return windowsEntryFor(appId) || webAppEntry(appId) || DesktopEntries.heuristicLookup(appId)
   }
 
   // A window's own entry, or the one of the program behind it (found later
   // through its process), so e.g. a terminal with its own class joins the
   // terminal's button and can be pinned like it.
   function windowEntry(appId, lookup) {
-    var entry = lookup.charAt(0) === "@" ? null : entryFor(appId)
+    var entry = root.windowsEntryFor(appId) || (lookup.charAt(0) === "@" ? null : entryFor(appId))
     if (entry) return entry
     var found = root.fallbacks[lookup]
     // A terminal window with nothing but a shell inside stays the terminal.
@@ -619,12 +653,12 @@ Item {
         var parents = lines.slice(2, split === -1 ? lines.length : split)
         var children = split === -1 ? [] : lines.slice(split + 1).filter(function(line) { return line !== "" })
         var own = lines[0] || ""
-        var entry = null
+        var entry = root.windowsEntryFor(own)
         if (iconProc.appId.charAt(0) === "@") {
           // A terminal window: the app is what runs inside it.
           for (var c = 0; !entry && c < children.length; c++) entry = root.appInside(children[c])
         } else {
-          entry = root.entryFor(own) || root.programs[own] || null
+          entry = entry || root.entryFor(own) || root.programs[own] || null
           // Not found: the entry of a parent (the script that opened it).
           for (var i = 0; !entry && i < parents.length; i++)
             if (parents[i] in root.programs) entry = root.programs[parents[i]]

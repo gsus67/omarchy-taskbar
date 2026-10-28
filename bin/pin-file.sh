@@ -81,7 +81,9 @@ write_launcher() {
   fi
   exec_line=$(desktop_exec_arg "$path")
   if [[ $kind == *.exe || $kind == *.msi ]]; then
-    exec_line="xdg-open $exec_line"
+    # GIO parses the default handler's desktop Exec quoting correctly. The
+    # generic xdg-open backend can pass literal quotes to the Proton runner.
+    exec_line="gio open $exec_line"
   fi
   name=${name%.*}
   [[ -n $name ]] || return 1
@@ -125,8 +127,29 @@ remove_pin() {
   rm -f -- "$applications/$1.desktop" "$icons/$1.png" || return 0
 }
 
+repair_pin() (
+  local id=$1 entry tmp line changed=false
+  local -a lines=()
+  [[ $id =~ ^omarchy-taskbar-[0-9a-f]{16}$ ]] || return 0
+  entry=$applications/$id.desktop
+  [[ -f $entry && ! -L $entry ]] || return 0
+  while IFS= read -r line || [[ -n $line ]]; do
+    if [[ $line == 'Exec=xdg-open "'* && ( ${line,,} == *'.exe"' || ${line,,} == *'.msi"' ) ]]; then
+      line="Exec=gio open ${line#Exec=xdg-open }"
+      changed=true
+    fi
+    lines+=("$line")
+  done < "$entry"
+  [[ $changed == true ]] || return 0
+  tmp=$(mktemp "$applications/.omarchy-taskbar-XXXXXX") || return 0
+  trap 'rm -f -- "$tmp"' EXIT
+  printf '%s\n' "${lines[@]}" > "$tmp"
+  chmod 644 -- "$tmp" && mv -f -- "$tmp" "$entry"
+)
+
 [[ $# == 3 ]] || exit 0
 case $1 in
   add) add_pin "$2" "$3" ;;
   remove) remove_pin "$2" ;;
+  repair) repair_pin "$2" ;;
 esac

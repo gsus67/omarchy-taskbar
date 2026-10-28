@@ -10,7 +10,7 @@ them fast and shows every open app, all centered.
 ![Omarchy Taskbar](preview.png)
 
 The bar up close, with pinned apps, open apps and web apps with their own
-icons (WhatsApp, YouTube, Discord, Google Maps, Google Photos):
+icons:
 
 ![The bar, dark](assets/bar-dark.png)
 
@@ -25,8 +25,7 @@ bar:
 
 ![With windows open and the transparent bar](assets/screen-transparent.png)
 
-An app with several windows, here three terminals on workspaces 8, 9 and 10:
-a click shows each one with its workspace, and picking one jumps there.
+Click an app with several windows to choose a thumbnail and jump to its workspace.
 
 ![Window previews with their workspace](assets/window-previews.png)
 
@@ -53,10 +52,8 @@ a click shows each one with its workspace, and picking one jumps there.
 - **Right click**: pin/unpin, new window, close. New window works for every
   app, also windows without a desktop entry (such as a terminal started with
   its own class).
-- **The right icon for apps behind other programs**: apps running inside a
-  terminal (cliamp, Voxtype, Omarchy's Docker and monitor TUIs) and windows
-  opened by a script (the Windows VM's FreeRDP window) show the app's own icon.
-  Only process names are read, never command lines.
+- **Application icons**: apps launched through a terminal or script can show
+  their own icon.
 - **Web apps** (Omarchy's `omarchy-webapp-install`) show their own icon, get
   their own button and can be pinned, instead of appearing as the browser.
 - **Double click on empty bar space**: toggle transparency, exactly like
@@ -81,9 +78,8 @@ behind it, looked up once with `hyprctl`.
 Drag a supported file from your file manager onto any bar. Installed `.desktop`
 files use their desktop entry id; launchers from elsewhere are copied into your
 user applications folder. Programs and AppImages need execute permission.
-Windows files open with the system default handler for their MIME type through
-`gio open`, including GE-Proton if that is your configured handler. This
-preserves quoted paths in the handler's desktop entry. Existing Windows pins
+Windows files open with the system default handler for their file type,
+including GE-Proton if that is your configured handler. Existing Windows pins
 are repaired automatically when the bar loads, without changing their order,
 icons or your default application.
 Windows whose class or process name matches a pinned `.exe` reuse its icon
@@ -121,17 +117,16 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
   to **10%** in ten-point steps. Both styles support scale and length. The chosen
   length is a minimum: the bar grows to fit its icons, then shrinks back as apps
   close, up to each screen's maximum. Crystal keeps a small margin even at Full.
-  If icons exceed that maximum, scroll over the bar to reach them. There is no
-  separate automatic mode. Menus follow the system's English/Spanish locale.
+  If icons exceed that maximum, scroll over the bar to reach them. Menus follow
+  the system's English/Spanish locale.
   Example: `{"style": "crystal", "scale": 0.9, "width": "20%"}`. Hand-edited
   pixel widths are still supported. Choosing a default removes that individual
   setting while preserving other keys; an empty config is deleted. Invalid or
   missing settings use Default, 1x and full length. Double-click transparency
-  remains available in Default and still controls both native bars. Preference
-  writes are serialized so rapid selections keep every choice and other keys.
+  remains available in Default and still controls both native bars.
 - `~/.local/share/applications/omarchy-taskbar/<hash>.desktop`: generated
   launchers and copies of external `.desktop` files. The directory is private
-  (`0700`) and the launchers are owner-readable only (`0600`). Existing flat
+  (`0700`) and launcher access is restricted to your account (`0600`). Existing flat
   launchers are moved into it when their pins are repaired at startup.
 - `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
   extracted Windows icons, when available.
@@ -157,7 +152,7 @@ python3 scripts/check_native_settings.py
 
 The QML and native settings checks use the existing Qt/Quickshell installation.
 The native settings check writes only to an isolated temporary directory.
-See [CHANGELOG.md](CHANGELOG.md) for v0.1.0 changes.
+See the [changelog](CHANGELOG.md) for release history.
 
 ## License
 

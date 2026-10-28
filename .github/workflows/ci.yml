@@ -23,6 +23,29 @@ jobs:
       - name: Plugin manifest
         run: python3 -c "import json; json.load(open('manifest.json'))"
 
+  native-runtime:
+    name: Native security and runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: archlinux@sha256:e82623936fa1a69700b48e98b058df6eaab18b737c27473a7234a40fdecb9413
+    steps:
+      - name: Install tools only in the disposable CI container
+        run: pacman -Syu --noconfirm --needed git python nodejs jq quickshell qt6-declarative
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Launcher permissions, conflicts, symlinks and command arguments
+        run: python3 -m unittest discover -s tests -p test_file_pins.py -v
+      - name: Render Crystal on light and dark backgrounds
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+      - name: Actual settings queue and icon-scan debounce
+        run: |
+          python3 scripts/check_native_settings.py
+          python3 scripts/check_native_runtime.py
+
   codeql:
     name: CodeQL (actions)
     runs-on: ubuntu-latest

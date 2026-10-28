@@ -11,6 +11,9 @@ Every change runs, in CI:
 - guards for the commands it runs: every `bash -c` script is made of string
   literals only and receives window data as positional arguments, never pasted
   into the script; other programs start from argument lists, without a shell;
+- native Qt/Quickshell checks in a disposable CI container: launcher permission
+  regressions, Crystal rendering, serialized settings writes and icon-scan
+  debounce under a burst of events, including an idle check against polling;
 - ShellCheck on standalone scripts and each embedded `bash -c` script;
 - CodeQL `security-extended` analysis and zizmor for the workflows;
 - OpenSSF Scorecard (weekly and on `main`) for the repository's practices.

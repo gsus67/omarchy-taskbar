@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import time
@@ -262,15 +263,74 @@ class FilePinTest(unittest.TestCase):
         self.assertEqual(self.entry(key).read_text(), DESKTOP)
         self.assertEqual(self.entry(key).stat().st_mode & 0o777, 0o600)
 
-    def test_conflicting_legacy_and_private_entries_are_not_overwritten(self):
+    def test_conflicting_legacy_launcher_stays_private_without_overwriting_either_copy(self):
         path = self.file("Game.exe")
         key = self.run_script("add", path)
         current = self.entry(key).read_text()
-        legacy = self.file(key + ".desktop", DESKTOP, parent=self.applications)
-        self.assertEqual(self.run_script("add", path), "")
+        sentinel = "REMOTE_PASSWORD=conflict-sentinel-secret"
+        old = DESKTOP.replace("Exec=/bin/true", "Exec=/bin/true " + sentinel)
+        legacy = self.file(key + ".desktop", old, parent=self.applications)
+        for operation, argument in (("add", path), ("repair", key)):
+            for mode in (0o644, 0o640, 0o444, 0o600, 0o400):
+                with self.subTest(operation=operation, mode=oct(mode)):
+                    legacy.chmod(mode)
+                    self.assertEqual(self.run_script(operation, argument), "")
+                    self.assertEqual(legacy.read_text(), old)
+                    self.assertIn(sentinel, legacy.read_text())
+                    self.assertEqual(legacy.stat().st_mode & 0o777, mode & 0o700)
+                    self.assertEqual(self.entry(key).read_text(), current)
+
+    def test_legacy_is_restricted_even_when_private_directory_is_unusable(self):
+        path = self.file("Game.exe")
+        key = "omarchy-taskbar-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        secret = DESKTOP.replace("Exec=/bin/true", "Exec=/bin/true conflict-sentinel-secret")
+        legacy = self.file(key + ".desktop", secret, parent=self.applications)
+        external = self.base / "outside"
+        external.mkdir()
+        protected = self.file(key.removeprefix("omarchy-taskbar-") + ".desktop", DESKTOP, parent=external)
+        for kind in ("symlink", "file"):
+            if kind == "symlink":
+                self.private_applications.symlink_to(external, target_is_directory=True)
+            else:
+                self.private_applications.write_text("not a directory")
+            for operation, argument in (("add", path), ("repair", key)):
+                with self.subTest(kind=kind, operation=operation):
+                    legacy.chmod(0o644)
+                    self.assertEqual(self.run_script(operation, argument), "")
+                    self.assertEqual(legacy.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(legacy.read_text(), secret)
+                    self.assertEqual(protected.read_text(), DESKTOP)
+            self.private_applications.unlink()
+
+    def test_legacy_symlink_is_not_followed_or_chmodded(self):
+        path = self.file("Game.exe")
+        key = "omarchy-taskbar-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        original = self.file("original.desktop", DESKTOP)
+        original.chmod(0o644)
+        self.applications.mkdir(parents=True)
+        legacy = self.legacy_entry(key)
+        legacy.symlink_to(original)
+        for operation, argument in (("add", path), ("repair", key)):
+            with self.subTest(operation=operation):
+                self.assertEqual(self.run_script(operation, argument), "")
+                self.assertTrue(legacy.is_symlink())
+                self.assertEqual(original.stat().st_mode & 0o777, 0o644)
+                self.assertEqual(original.read_text(), DESKTOP)
+                self.assertFalse(self.entry(key).exists())
+
+    def test_destination_created_during_migration_is_not_overwritten(self):
+        key = "omarchy-taskbar-0123456789abcdef"
+        secret = DESKTOP.replace("Exec=/bin/true", "Exec=/bin/true conflict-sentinel-secret")
+        legacy = self.file(key + ".desktop", secret, parent=self.applications)
+        legacy.chmod(0o644)
+        (self.bin / "mv").unlink()
+        real_mv = shlex.quote(shutil.which("mv"))
+        self.file("mv", '#!/bin/bash\nprintf "%s" "existing-private-copy" > "${@: -1}"\n'
+                  + 'exec ' + real_mv + ' "$@"\n', executable=True, parent=self.bin)
         self.run_script("repair", key)
-        self.assertEqual(legacy.read_text(), DESKTOP)
-        self.assertEqual(self.entry(key).read_text(), current)
+        self.assertEqual(legacy.read_text(), secret)
+        self.assertEqual(legacy.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.entry(key).read_text(), "existing-private-copy")
 
     def test_private_directory_symlink_is_not_followed(self):
         external = self.base / "external-applications"

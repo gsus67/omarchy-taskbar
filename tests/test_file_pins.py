@@ -66,7 +66,7 @@ class FilePinTest(unittest.TestCase):
             with self.subTest(value=value):
                 path = self.file(value + ".exe")
                 key = self.run_script("add", path)
-                self.assertIn(f'Exec=xdg-open "{self.base}/{expected}.exe"\n',
+                self.assertIn(f'Exec=gio open "{self.base}/{expected}.exe"\n',
                               self.entry(key).read_text())
 
     def test_windows_files_use_default_handler_without_execute_permission(self):
@@ -77,7 +77,7 @@ class FilePinTest(unittest.TestCase):
                 digest = hashlib.sha256(str(path).encode()).hexdigest()[:16]
                 self.assertEqual(key, "omarchy-taskbar-" + digest)
                 text = self.entry(key).read_text()
-                self.assertIn(f'Exec=xdg-open "{path}"\n', text)
+                self.assertIn(f'Exec=gio open "{path}"\n', text)
                 self.assertIn(f'Name={path.stem}\n', text)
                 self.assertIn("Icon=application-x-executable\n", text)
                 self.assertEqual(self.run_script("add", path), key)
@@ -91,6 +91,58 @@ class FilePinTest(unittest.TestCase):
                 key = self.run_script("add", path)
                 self.assertIn(f'Exec="{path}"\n', self.entry(key).read_text())
 
+    def test_existing_windows_pins_are_repaired_without_changing_other_fields(self):
+        for name in ("Game.exe", "Setup.MSI"):
+            with self.subTest(name=name):
+                key = self.run_script("add", self.file(name))
+                old = self.entry(key).read_text().replace("Exec=gio open ", "Exec=xdg-open ")
+                self.entry(key).write_text(old)
+                self.assertEqual(self.run_script("repair", key), "")
+                expected = old.replace("Exec=xdg-open ", "Exec=gio open ")
+                self.assertEqual(self.entry(key).read_text(), expected)
+                before = self.entry(key).stat().st_mtime_ns
+                self.run_script("repair", key)
+                self.assertEqual(self.entry(key).stat().st_mtime_ns, before)
+        self.assertFalse(list(self.applications.glob(".omarchy-taskbar-*")))
+
+    def test_repair_does_not_touch_unrelated_launchers_or_symlinks(self):
+        path = self.file("external.desktop", DESKTOP)
+        key = self.run_script("add", path)
+        self.run_script("repair", key)
+        self.assertEqual(self.entry(key).read_text(), DESKTOP)
+        self.entry(key).unlink()
+        self.entry(key).symlink_to(path)
+        self.run_script("repair", key)
+        self.assertTrue(self.entry(key).is_symlink())
+        self.assertEqual(path.read_text(), DESKTOP)
+        self.run_script("repair", "../../external")
+
+    @unittest.skipUnless(shutil.which("gio"), "GIO is needed for a real desktop launch")
+    def test_real_default_handler_with_quoted_runner_path(self):
+        path = self.file('Game with spaces.exe', "MZ" + "\x00" * 128)
+        result_path = self.base / "launch-result"
+        runner = self.file("runner with spaces", '#!/bin/bash\nprintf "%s\\n" "$@" > "$LAUNCH_RESULT"\n')
+        key = self.run_script("add", path)
+        self.file("handler.desktop", '[Desktop Entry]\nType=Application\nName=Test handler\n'
+                  f'Exec={BASH} "{runner}" %f\nNoDisplay=true\n', parent=self.applications)
+        config = self.base / "config"
+        config.mkdir()
+        (config / "mimeapps.list").write_text("[Default Applications]\n" + "".join(
+            f"{mime}=handler.desktop;\n" for mime in (
+                "application/x-ms-dos-executable", "application/vnd.microsoft.portable-executable",
+                "application/x-msdownload", "application/octet-stream")))
+        (self.bin / "gio").symlink_to(shutil.which("gio"))
+        env = dict(self.env, XDG_CONFIG_HOME=str(config), LAUNCH_RESULT=str(result_path),
+                   XDG_CURRENT_DESKTOP="", DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(self.base / "no-bus"))
+        result = subprocess.run([shutil.which("gio"), "launch", str(self.entry(key))],
+                                env=env, cwd=self.base, text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        deadline = time.monotonic() + 3
+        while not result_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(result_path.exists(), "Default handler did not run")
+        self.assertEqual(result_path.read_text(), str(path) + "\n")
+
     def test_hostile_filename_stays_data_in_exec_and_name(self):
         name = 'a "quote" `touch injected` $(touch injected) \\.exe'
         path = self.file(name)
@@ -98,7 +150,7 @@ class FilePinTest(unittest.TestCase):
         text = self.entry(key).read_text()
         expected = (str(self.base) + '/a \\\\"quote\\\\" \\\\`touch injected\\\\` '
                     '\\\\$(touch injected) \\\\\\\\.exe')
-        self.assertIn('Exec=xdg-open "' + expected + '"\n', text)
+        self.assertIn('Exec=gio open "' + expected + '"\n', text)
         self.assertIn(r'Name=a\s"quote"\s`touch\sinjected`\s$(touch\sinjected)\s\\' + '\n', text)
         self.assertFalse((self.base / "injected").exists())
 
@@ -107,7 +159,7 @@ class FilePinTest(unittest.TestCase):
         name = 'a "quote" `literal` $literal \\.exe'
         path = self.file(name)
         result_path = self.base / "launch-result"
-        self.file("xdg-open", "#!/bin/bash\nprintf '%s\\n' \"$@\" > \"$LAUNCH_RESULT\"\n",
+        self.file("gio", "#!/bin/bash\nprintf '%s\\n' \"$@\" > \"$LAUNCH_RESULT\"\n",
                   executable=True, parent=self.bin)
         key = self.run_script("add", path)
         env = dict(self.env, LAUNCH_RESULT=str(result_path),
@@ -118,7 +170,7 @@ class FilePinTest(unittest.TestCase):
         deadline = time.monotonic() + 2
         while not result_path.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertEqual(result_path.read_text(), str(path) + "\n")
+        self.assertEqual(result_path.read_text(), "open\n" + str(path) + "\n")
 
     @unittest.skipUnless(shutil.which("gio"), "GIO is needed for a real desktop launch")
     def test_desktop_launcher_runs_the_exact_executable(self):

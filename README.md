@@ -80,7 +80,13 @@ Drag a supported file from your file manager onto any bar. Installed `.desktop`
 files use their desktop entry id; launchers from elsewhere are copied into your
 user applications folder. Programs and AppImages need execute permission.
 Windows files open with the system default handler for their MIME type through
-`xdg-open`, including GE-Proton if that is your configured handler.
+`gio open`, including GE-Proton if that is your configured handler. This
+preserves quoted paths in the handler's desktop entry. Existing Windows pins
+are repaired automatically when the bar loads, without changing their order,
+icons or your default application.
+Windows whose class or process name matches a pinned `.exe` reuse its icon
+and window group. Generic Wine classes are resolved per window. Ambiguous
+matches between pins with the same executable name are left separate.
 
 For `.exe` files, the bar extracts an icon when both `wrestool` and `icotool`
 (icoutils) are already installed; otherwise it uses a generic executable icon.

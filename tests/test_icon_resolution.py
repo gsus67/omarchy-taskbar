@@ -70,7 +70,7 @@ class IconResolutionTest(unittest.TestCase):
         self.assertEqual(SOURCE.count('root.iconIndex ='), 1)
 
     def test_scan_starts_once_and_app_changes_are_debounced_without_polling(self):
-        self.assertIn('Component.onCompleted: root.refreshIcons()', SOURCE)
+        self.assertRegex(SOURCE, r'Component\.onCompleted: \{\s*root\.refreshIcons\(\)')
         self.assertIn('if (!iconIndexScan.running) iconIndexScan.running = true', function("refreshIcons"))
         timer = block("Timer", "iconIndexDebounce")
         self.assertIn('interval: 750', timer)

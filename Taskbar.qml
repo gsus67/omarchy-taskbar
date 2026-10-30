@@ -27,7 +27,7 @@ Item {
   readonly property string pluginDirectory: decodeURIComponent(
     Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
   readonly property string pinsPath: configHome + "/omarchy-taskbar/pinned.json"
-  readonly property int barSize: Math.round(Style.bar.sizeHorizontal * configuredScale)
+  readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))
   readonly property int iconSize: Math.round(barSize * 0.66)
   readonly property color foreground: Commons.Color.bar.text
 
@@ -39,6 +39,9 @@ Item {
   property var configSnapshot: null
   property var configWrites: []
   readonly property bool crystal: configuredStyle === "crystal"
+  property string configuredPosition: "bottom"
+  readonly property bool combined: configuredPosition === "combined"
+  readonly property string pluginId: "io.github.gsus67.omarchy-taskbar"
 
   // The one right-click menu open, if any. Opening another or clicking the
   // bar closes it.
@@ -51,8 +54,21 @@ Item {
   }
 
   function closeMenu() {
-    if (root.openMenu) root.openMenu.visible = false
+    if (root.openMenu) {
+      root.openMenu.visible = false
+      root.closedMenu = root.openMenu
+      root.closedMenuAt = Date.now()
+    }
     root.openMenu = null
+  }
+
+  // In Combine a press on the icon that opened a menu already closed it (the
+  // bar's window is outside the focus grab), so its click must not reopen it.
+  property var closedMenu: null
+  property real closedMenuAt: 0
+
+  function justClosed(menu) {
+    return root.closedMenu === menu && Date.now() - root.closedMenuAt < 500
   }
 
   // ------------------------------------------------------------ transparency
@@ -69,6 +85,9 @@ Item {
       try {
         var config = JSON.parse(text())
         root.transparent = !!(config.bar && config.bar.transparent === true)
+        root.onOmarchyBar = root.layoutHas(config.bar && config.bar.layout)
+        root.shellConfigLoaded = true
+        root.placeBarWidget()
       } catch (e) {}
     }
   }
@@ -93,12 +112,14 @@ Item {
         root.configuredWidth = config && typeof config === "object" && !Array.isArray(config) && config.width !== undefined ? config.width : null
         root.configuredScale = root.scaleFor(config && config.scale)
         root.configuredStyle = root.styleFor(config && config.style)
+        root.configuredPosition = root.positionFor(config && config.position)
         if (!configWriter.running && root.configWrites.length === 0)
           root.configSnapshot = config && typeof config === "object" && !Array.isArray(config) ? config : ({})
       } catch (e) {
         root.configuredWidth = null
         root.configuredScale = 1
         root.configuredStyle = "default"
+        root.configuredPosition = "bottom"
         if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = ({})
       }
     }
@@ -106,12 +127,14 @@ Item {
       root.configuredWidth = null
       root.configuredScale = 1
       root.configuredStyle = "default"
+      root.configuredPosition = "bottom"
       if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = ({})
     }
   }
 
   function scaleFor(value) { return [0.75, 0.9, 1, 1.25, 1.5, 2].indexOf(value) !== -1 ? value : 1 }
   function styleFor(value) { return value === "crystal" ? "crystal" : "default" }
+  function positionFor(value) { return ["top", "right", "left", "combined"].indexOf(value) !== -1 ? value : "bottom" }
 
   function widthFor(value, screenWidth, barSize, crystal, contentWidth) {
     var maximum = Math.max(1, screenWidth - (crystal ? Math.round(barSize * 0.8) : 0))
@@ -128,6 +151,12 @@ Item {
     if (page === "style") return [back,
       { label: t("Default", "Predeterminado"), key: "style", value: null, checked: configuredStyle === "default" },
       { label: "Crystal", key: "style", value: "crystal", checked: crystal }]
+    if (page === "position") return [back,
+      { label: t("Top", "Arriba"), key: "position", value: "top", checked: configuredPosition === "top" },
+      { label: t("Right", "Derecha"), key: "position", value: "right", checked: configuredPosition === "right" },
+      { label: t("Left", "Izquierda"), key: "position", value: "left", checked: configuredPosition === "left" },
+      { label: t("Bottom", "Abajo"), key: "position", value: null, checked: configuredPosition === "bottom" },
+      { label: t("Combine", "Combinar"), key: "position", value: "combined", checked: configuredPosition === "combined" }]
     if (page === "size") return [back,
       { label: t("Length", "Largo") + "  ›", page: "length" },
       { label: t("Width", "Ancho") + "  ›", page: "scale" }]
@@ -140,13 +169,17 @@ Item {
         key: "width", value: length === 100 ? null : length + "%",
         checked: length === 100 ? configuredWidth === null || configuredWidth === "100%" : configuredWidth === length + "%" }
     }))
-    return [{ label: t("Style", "Estilo") + "  ›", page: "style" },
-      { label: t("Size", "Tamaño") + "  ›", page: "size" }]
+    var items = [{ label: t("Style", "Estilo") + "  ›", page: "style" },
+      { label: t("Position", "Posición") + "  ›", page: "position" }]
+    // Combine follows Omarchy's bar: no size of its own to choose.
+    if (configuredPosition === "combined") return items
+    return items.concat([{ label: t("Size", "Tamaño") + "  ›", page: "size" }])
   }
 
   function saveConfig(key, value) {
-    if (key !== "style" && key !== "scale" && key !== "width") return
+    if (key !== "style" && key !== "position" && key !== "scale" && key !== "width") return
     if (key === "style" && value !== null && value !== "crystal") return
+    if (key === "position" && value !== null && root.positionFor(value) !== value) return
     if (key === "scale" && value !== null && root.scaleFor(value) !== value) return
     if (key === "width" && value !== null && ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"].indexOf(value) === -1) return
     var config = {}
@@ -673,7 +706,11 @@ Item {
     function onValuesChanged() { iconIndexDebounce.restart() }
   }
 
-  Component.onCompleted: root.refreshIcons()
+  Component.onCompleted: {
+    root.refreshIcons()
+    Local.Bridge.taskbar = root
+  }
+  Component.onDestruction: if (Local.Bridge.taskbar === root) Local.Bridge.taskbar = null
 
   // A window whose class has no desktop entry (e.g. `foot --app-id=x`) borrows
   // the icon, entry and program of the process behind it: { icon, entry, exe }.
@@ -745,103 +782,52 @@ Item {
   // ------------------------------------------------------------ the bar
 
   Variants {
-    model: Quickshell.screens
+    model: root.combined && Local.Bridge.modules > 0 ? [] : Quickshell.screens
 
     delegate: Component {
       PanelWindow {
         id: barWindow
         required property var modelData
-        readonly property int targetWidth: root.widthFor(root.configuredWidth, modelData.width, root.barSize, root.crystal,
-          appRow.implicitWidth + (root.crystal ? Style.space(20) : 0))
+        // Combine with no module on Omarchy's bar yet: stay reachable at the bottom.
+        readonly property string position: root.combined ? "bottom" : root.configuredPosition
+        readonly property bool vertical: position === "left" || position === "right"
+        readonly property int screenLength: vertical ? modelData.height : modelData.width
+        readonly property int targetWidth: root.widthFor(root.configuredWidth, screenLength, root.barSize, root.crystal,
+          (vertical ? appRow.implicitHeight : appRow.implicitWidth) + (root.crystal ? Style.space(20) : 0))
+        readonly property int edgeMargin: root.crystal ? Style.space(8) : 0
 
-        // Reuse Omarchy's Bar.qml drag threshold, captured ghost and marker.
-        // Each screen owns its gesture; only the saved pins are shared.
-        property var barDragSource: null
-        property var barDragTarget: null
-        property bool barDragAfter: false
-        property int barDragIndex: -1
-        property var barDragTargetGeometry: null
-        property url barDragImageUrl: ""
-        property point barDragScreenPoint: Qt.point(0, 0)
-        property point barDragOffset: Qt.point(0, 0)
-
-        function clearBarDrag() {
-          barDragSource = null
-          barDragTarget = null
-          barDragAfter = false
-          barDragIndex = -1
-          barDragTargetGeometry = null
-          barDragImageUrl = ""
-          barDragScreenPoint = Qt.point(0, 0)
-          barDragOffset = Qt.point(0, 0)
-        }
-
-        function captureBarDragGhost(button) {
-          var item = button.activeItem
-          item.grabToImage(function(result) {
-            if (barWindow.barDragSource === button && result && result.url)
-              barWindow.barDragImageUrl = result.url
-          }, Qt.size(Math.max(1, Math.ceil(item.width)), Math.max(1, Math.ceil(item.height))))
-        }
-
-        function screenPoint(point) {
-          return Qt.point(point.x + margins.left, point.y + screen.height - height - margins.bottom)
-        }
-
-        function updateBarDrag(button, x, y) {
-          var point = button.mapToItem(null, x, y)
-          barDragScreenPoint = screenPoint(point)
-          barDragTarget = null
-          barDragAfter = false
-          barDragIndex = -1
-          barDragTargetGeometry = null
-          if (point.x < 0 || point.x >= width || point.y < 0 || point.y >= height) return
-          // Returning to the source icon is a no-op, including an unpinned app.
-          if (x >= 0 && x < button.width && y >= 0 && y < button.height) return
-
-          var bestDistance = Infinity
-          for (var i = 0; i < appButtons.count; i++) {
-            var slot = appButtons.itemAt(i)
-            if (!slot) continue
-            var start = slot.mapToItem(null, 0, 0)
-            var pinIndex = root.pinned.indexOf(slot.app.key)
-            var beforeDistance = Math.abs(point.x - start.x)
-            var afterDistance = pinIndex < 0 ? Infinity : Math.abs(point.x - start.x - slot.width)
-            var after = afterDistance < beforeDistance
-            var distance = Math.min(beforeDistance, afterDistance)
-            if (distance < bestDistance) {
-              bestDistance = distance
-              barDragTarget = slot
-              barDragAfter = after
-              barDragIndex = pinIndex < 0 ? root.pinned.length : pinIndex + (after ? 1 : 0)
-              var marker = screenPoint(Qt.point(start.x + (after ? slot.width : 0), start.y))
-              var thickness = Style.spacing.xs
-              barDragTargetGeometry = { x: marker.x - thickness / 2, y: marker.y,
-                width: thickness, height: slot.height }
-            }
-            // Pins stay first; the first running icon marks the end of them.
-            if (pinIndex < 0) break
-          }
+        BarDrag {
+          id: barDrag
+          surface: barWindow
+          bounds: barWindow.contentItem
+          buttons: appButtons
+          vertical: barWindow.vertical
+          popupEdge: root.popupEdgeFor(barWindow.position)
+          offset: Qt.point(barWindow.position === "right" ? modelData.width - barWindow.width - barWindow.margins.right : barWindow.margins.left,
+            barWindow.position === "bottom" ? modelData.height - barWindow.height - barWindow.margins.bottom : barWindow.margins.top)
         }
 
         screen: modelData
         anchors {
-          bottom: true
-          left: true
-          right: true
+          top: position !== "bottom"
+          bottom: position !== "top"
+          left: position !== "right"
+          right: position !== "left"
         }
-        // Keep three anchors so Auto still reserves the bar's height.
-        margins.left: Math.floor((modelData.width - targetWidth) / 2)
-        margins.right: Math.ceil((modelData.width - targetWidth) / 2)
-        margins.bottom: root.crystal ? Style.space(8) : 0
+        // Keep three anchors so Auto still reserves the bar's thickness.
+        margins.left: vertical ? (position === "left" ? edgeMargin : 0) : Math.floor((screenLength - targetWidth) / 2)
+        margins.right: vertical ? (position === "right" ? edgeMargin : 0) : Math.ceil((screenLength - targetWidth) / 2)
+        margins.top: vertical ? Math.floor((screenLength - targetWidth) / 2) : (position === "top" ? edgeMargin : 0)
+        margins.bottom: vertical ? Math.ceil((screenLength - targetWidth) / 2) : (position === "bottom" ? edgeMargin : 0)
+        implicitWidth: root.barSize
         implicitHeight: root.barSize
         exclusionMode: ExclusionMode.Auto
         color: root.crystal || root.transparent ? "transparent" : Commons.Color.bar.background
         surfaceFormat.opaque: false
         WlrLayershell.namespace: "omarchy-taskbar"
         WlrLayershell.layer: WlrLayer.Top
-        onWidthChanged: clearBarDrag()
-        onHeightChanged: clearBarDrag()
+        onWidthChanged: barDrag.clearBarDrag()
+        onHeightChanged: barDrag.clearBarDrag()
 
         Local.CrystalSurface {
           anchors.fill: parent
@@ -849,23 +835,9 @@ Item {
           tint: Commons.Color.bar.background
         }
 
-        DragGhostPanel { bar: barWindow }
+        DragGhostPanel { bar: barDrag }
 
-        DropArea {
-          anchors.fill: parent
-          keys: ["text/uri-list"]
-          onDropped: function(drop) {
-            if (!drop.hasUrls) return
-            var accepted = false
-            drop.urls.forEach(function(url) {
-              var path = root.droppedPath(url)
-              if (path === "") return
-              root.queuePinChange("add", path)
-              accepted = true
-            })
-            if (accepted) drop.accept(Qt.CopyAction)
-          }
-        }
+        PinDropArea { anchors.fill: parent }
 
         // Empty bar space: appearance menu and double-click transparency.
         MouseArea {
@@ -887,29 +859,36 @@ Item {
         Flickable {
           id: appViewport
           anchors.fill: parent
-          anchors.leftMargin: root.crystal ? Style.space(10) : 0
+          anchors.leftMargin: root.crystal && !barWindow.vertical ? Style.space(10) : 0
           anchors.rightMargin: anchors.leftMargin
+          anchors.topMargin: root.crystal && barWindow.vertical ? Style.space(10) : 0
+          anchors.bottomMargin: anchors.topMargin
           contentWidth: Math.max(width, appRow.width)
-          contentHeight: height
+          contentHeight: Math.max(height, appRow.height)
           interactive: false
           clip: true
           onWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
           onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
+          onHeightChanged: contentY = Math.min(contentY, Math.max(0, contentHeight - height))
+          onContentHeightChanged: contentY = Math.min(contentY, Math.max(0, contentHeight - height))
 
           WheelHandler {
             target: null
             onWheel: function(event) {
-              if (appViewport.contentWidth <= appViewport.width) { event.accepted = false; return }
+              var range = barWindow.vertical ? appViewport.contentHeight - appViewport.height : appViewport.contentWidth - appViewport.width
+              if (range <= 0) { event.accepted = false; return }
               var delta = event.pixelDelta.x || event.pixelDelta.y || (event.angleDelta.x || event.angleDelta.y) / 120 * root.barSize * 2
-              appViewport.contentX = Math.max(0, Math.min(appViewport.contentWidth - appViewport.width, appViewport.contentX - delta))
+              if (barWindow.vertical) appViewport.contentY = Math.max(0, Math.min(range, appViewport.contentY - delta))
+              else appViewport.contentX = Math.max(0, Math.min(range, appViewport.contentX - delta))
               event.accepted = true
             }
           }
 
-          Row {
+          Grid {
             id: appRow
             x: Math.max(0, (appViewport.width - width) / 2)
-            height: appViewport.height
+            y: Math.max(0, (appViewport.height - height) / 2)
+            columns: barWindow.vertical ? 1 : Math.max(1, root.apps.length)
             spacing: Style.space(2)
 
             Repeater {
@@ -919,87 +898,411 @@ Item {
               delegate: AppButton {
                 required property var modelData
                 app: modelData
-                bar: barWindow
+                bar: barDrag
               }
             }
           }
         }
 
-        PopupWindow {
+        BarMenu {
           id: barMenu
-          property string page: "root"
-          property int currentIndex: 0
-          readonly property var items: root.barMenuItems(page)
-          onPageChanged: currentIndex = 0
-          function activate(index) {
-            var item = items[index]
-            if (!item) return
-            if (item.page !== undefined) { page = item.page; return }
-            root.closeMenu()
-            root.saveConfig(item.key, item.value)
+          bar: barDrag
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ Combine
+
+  property bool shellConfigLoaded: false
+  property bool onOmarchyBar: false
+  property bool placingBarWidget: false
+
+  onCombinedChanged: root.placeBarWidget()
+
+  function layoutHas(layout) {
+    if (!layout || typeof layout !== "object") return false
+    return ["left", "center", "right"].some(function(section) {
+      return Array.isArray(layout[section]) && layout[section].some(function(entry) {
+        return (entry && entry.id ? entry.id : entry) === root.pluginId
+      })
+    })
+  }
+
+  // Stays on the bar when leaving Combine (hidden), so coming back keeps its
+  // place. Omarchy only adds a widget it doesn't already know: an install from
+  // before Combine is listed as a panel, so it has to leave that list first.
+  // That unloads this panel, hence a detached shell that outlives it.
+  function placeBarWidget() {
+    if (!root.combined || !root.shellConfigLoaded || root.onOmarchyBar || root.placingBarWidget) return
+    root.placingBarWidget = true
+    Quickshell.execDetached(["bash", "-c",
+      'omarchy plugin disable "$1"; omarchy bar put "$1" --section left --after omarchy.workspaces || omarchy plugin enable "$1"',
+      "omarchy-taskbar", root.pluginId])
+  }
+
+  function popupEdgeFor(position) {
+    if (position === "bottom") return Edges.Top
+    if (position === "left") return Edges.Right
+    if (position === "right") return Edges.Left
+    return Edges.Bottom
+  }
+
+  // Omarchy's module slots in a bar window. A slot is recognised by the
+  // properties the bar gives it; its children are the module, not more slots.
+  function barSlots(item, found) {
+    var children = item.children
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i]
+      if ("activeItem" in child && "region" in child) {
+        if (child.visible && child.width > 0) found.push(child)
+      } else root.barSlots(child, found)
+    }
+    return found
+  }
+
+  // Room left along the bar before the module's section touches the next one.
+  // Modules of its own section just move along. A center section can grow to
+  // either side, so it uses the tighter one.
+  function freeLength(own, slots, barLength) {
+    var first = own.start
+    var last = own.end
+    var before = 0
+    var after = barLength
+    slots.forEach(function(slot) {
+      if (slot.region === own.region) {
+        first = Math.min(first, slot.start)
+        last = Math.max(last, slot.end)
+      } else if (slot.start < own.start) before = Math.max(before, slot.end)
+      else after = Math.min(after, slot.start)
+    })
+    var free = own.region === "left" ? after - last
+      : own.region === "right" ? first - before
+      : Math.min(first - before, after - last)
+    return Math.max(0, free)
+  }
+
+  // What BarWidget.qml shows: the same buttons, menus and drag as the bar above,
+  // sized by Omarchy's bar. It grows with its icons up to the next section.
+  readonly property Component combinedModule: Component {
+    Item {
+      id: module
+
+      property var widget: null
+      readonly property var hostBar: widget ? widget.bar : null
+      readonly property bool vertical: !!hostBar && hostBar.vertical === true
+      readonly property string position: hostBar ? hostBar.position : "top"
+      readonly property var surface: module.QsWindow.window
+      readonly property int margin: Style.space(6)
+      readonly property real contentLength: (vertical ? moduleButtonsGrid.height : moduleButtonsGrid.width) + margin * 2
+      property real maxLength: root.barSize * 8
+      readonly property real length: Math.max(root.barSize, Math.min(contentLength, maxLength))
+
+      implicitWidth: vertical ? Style.bar.sizeVertical : length
+      implicitHeight: vertical ? length : root.barSize
+
+      Component.onCompleted: Local.Bridge.modules += 1
+      Component.onDestruction: Local.Bridge.modules -= 1
+
+      function updateMaxLength() {
+        if (!surface || !surface.contentItem) return
+        var slot = module
+        while (slot && !("activeItem" in slot)) slot = slot.parent
+        if (!slot) return
+        function along(item) {
+          var point = item.mapToItem(null, 0, 0)
+          var start = vertical ? point.y : point.x
+          return { region: item.region, start: start, end: start + (vertical ? item.height : item.width) }
+        }
+        var own = along(slot)
+        var free = root.freeLength(own, root.barSlots(surface.contentItem, []).map(along), vertical ? surface.height : surface.width)
+        maxLength = Math.max(root.barSize, own.end - own.start + free - Style.space(4))
+      }
+
+      // Neighbours change size on their own (clock, tray), with no signal here.
+      Timer {
+        interval: 1000
+        repeat: true
+        running: module.visible
+        triggeredOnStart: true
+        onTriggered: module.updateMaxLength()
+      }
+
+      BarDrag {
+        id: moduleDrag
+        surface: module.surface
+        bounds: module
+        buttons: moduleButtons
+        vertical: module.vertical
+        thickness: Style.bar.sizeVertical
+        sharedSurface: true
+        popupEdge: root.popupEdgeFor(module.position)
+        offset: module.surface && module.surface.screen
+          ? Qt.point(module.position === "right" ? module.surface.screen.width - module.surface.width : 0,
+            module.position === "bottom" ? module.surface.screen.height - module.surface.height : 0)
+          : Qt.point(0, 0)
+      }
+
+      DragGhostPanel { bar: moduleDrag }
+
+      // Default shows Omarchy's bar through; Crystal keeps its glass here too.
+      Local.CrystalSurface {
+        anchors.fill: parent
+        visible: root.crystal
+        tint: Commons.Color.bar.background
+      }
+
+      PinDropArea { anchors.fill: parent }
+
+      // Margin around the icons: right-click for the menu. A left press falls
+      // through to Omarchy's bar, which drags the whole module.
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        onPressed: root.closeMenu()
+        onClicked: function(event) {
+          var point = mapToItem(null, event.x, event.y)
+          moduleMenu.anchor.rect.x = point.x
+          moduleMenu.anchor.rect.y = point.y
+          root.showMenu(moduleMenu)
+        }
+      }
+
+      Flickable {
+        id: moduleViewport
+        anchors.fill: parent
+        anchors.leftMargin: module.vertical ? 0 : module.margin
+        anchors.rightMargin: anchors.leftMargin
+        anchors.topMargin: module.vertical ? module.margin : 0
+        anchors.bottomMargin: anchors.topMargin
+        contentWidth: moduleButtonsGrid.width
+        contentHeight: moduleButtonsGrid.height
+        interactive: false
+        clip: true
+        onWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
+        onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
+        onHeightChanged: contentY = Math.min(contentY, Math.max(0, contentHeight - height))
+        onContentHeightChanged: contentY = Math.min(contentY, Math.max(0, contentHeight - height))
+
+        WheelHandler {
+          target: null
+          onWheel: function(event) {
+            var range = module.vertical ? moduleViewport.contentHeight - moduleViewport.height : moduleViewport.contentWidth - moduleViewport.width
+            if (range <= 0) { event.accepted = false; return }
+            var delta = event.pixelDelta.x || event.pixelDelta.y || (event.angleDelta.x || event.angleDelta.y) / 120 * root.barSize * 2
+            if (module.vertical) moduleViewport.contentY = Math.max(0, Math.min(range, moduleViewport.contentY - delta))
+            else moduleViewport.contentX = Math.max(0, Math.min(range, moduleViewport.contentX - delta))
+            event.accepted = true
           }
-          visible: false
-          anchor.window: barWindow
-          anchor.rect.width: 1
-          anchor.rect.height: 1
-          anchor.edges: Edges.Top
-          anchor.gravity: Edges.Top
-          anchor.margins.top: -Style.space(4)
-          implicitWidth: Style.space(238)
-          implicitHeight: settingsColumn.implicitHeight + Style.space(8)
-          color: "transparent"
+        }
 
-          Rectangle {
-            anchors.fill: parent
-            focus: true
-            Keys.onEscapePressed: root.closeMenu()
-            Keys.onUpPressed: barMenu.currentIndex = (barMenu.currentIndex + barMenu.items.length - 1) % barMenu.items.length
-            Keys.onDownPressed: barMenu.currentIndex = (barMenu.currentIndex + 1) % barMenu.items.length
-            Keys.onReturnPressed: barMenu.activate(barMenu.currentIndex)
-            Keys.onEnterPressed: barMenu.activate(barMenu.currentIndex)
-            Keys.onLeftPressed: { if (barMenu.page !== "root") barMenu.activate(0) }
-            Keys.onRightPressed: { if (barMenu.items[barMenu.currentIndex].page !== undefined) barMenu.activate(barMenu.currentIndex) }
-            color: Commons.Color.menu.background
-            border.color: Commons.Color.menu.border
-            border.width: Style.normalBorderWidth
-            radius: Style.cornerRadius
+        Grid {
+          id: moduleButtonsGrid
+          columns: module.vertical ? 1 : Math.max(1, root.apps.length)
+          spacing: Style.space(2)
 
-            Column {
-              id: settingsColumn
-              anchors.centerIn: parent
+          Repeater {
+            id: moduleButtons
+            model: root.apps
 
-              Repeater {
-                model: barMenu.items
-                delegate: MenuRow {
-                  required property var modelData
-                  required property int index
-                  width: barMenu.implicitWidth - Style.space(8)
-                  text: modelData.label
-                  checkable: modelData.key !== undefined
-                  checked: modelData.checked === true
-                  highlighted: barMenu.currentIndex === index
-                  onHovered: barMenu.currentIndex = index
-                  onTriggered: barMenu.activate(index)
-                }
-              }
+            delegate: AppButton {
+              required property var modelData
+              app: modelData
+              bar: moduleDrag
             }
-          }
-
-          onVisibleChanged: {
-            if (visible) {
-              page = "root"
-              currentIndex = 0
-              Qt.callLater(function() { settingsGrab.active = barMenu.visible })
-            } else settingsGrab.active = false
-          }
-
-          HyprlandFocusGrab {
-            id: settingsGrab
-            windows: [barMenu, barWindow]
-            onCleared: if (root.openMenu === barMenu) root.closeMenu()
           }
         }
       }
+
+      BarMenu {
+        id: moduleMenu
+        bar: moduleDrag
+      }
+    }
+  }
+
+  component PinDropArea: DropArea {
+    keys: ["text/uri-list"]
+    onDropped: function(drop) {
+      if (!drop.hasUrls) return
+      var accepted = false
+      drop.urls.forEach(function(url) {
+        var path = root.droppedPath(url)
+        if (path === "") return
+        root.queuePinChange("add", path)
+        accepted = true
+      })
+      if (accepted) drop.accept(Qt.CopyAction)
+    }
+  }
+
+  // Omarchy's Bar.qml drag threshold, captured ghost and marker. Each bar owns
+  // its gesture; only the saved pins are shared.
+  component BarDrag: QtObject {
+    id: drag
+    required property var surface
+    required property var bounds
+    required property var buttons
+    property point offset: Qt.point(0, 0)
+    property bool vertical: false
+    property int popupEdge: Edges.Top
+    property int thickness: root.barSize
+    // On Omarchy's bar the window isn't ours: a click on its other modules must
+    // count as outside, or the open menu never hears about it.
+    property bool sharedSurface: false
+    readonly property var screen: surface ? surface.screen : null
+
+    property var barDragSource: null
+    property var barDragTarget: null
+    property bool barDragAfter: false
+    property int barDragIndex: -1
+    property var barDragTargetGeometry: null
+    property url barDragImageUrl: ""
+    property point barDragScreenPoint: Qt.point(0, 0)
+    property point barDragOffset: Qt.point(0, 0)
+
+    function clearBarDrag() {
+      barDragSource = null
+      barDragTarget = null
+      barDragAfter = false
+      barDragIndex = -1
+      barDragTargetGeometry = null
+      barDragImageUrl = ""
+      barDragScreenPoint = Qt.point(0, 0)
+      barDragOffset = Qt.point(0, 0)
+    }
+
+    function captureBarDragGhost(button) {
+      var item = button.activeItem
+      item.grabToImage(function(result) {
+        if (drag.barDragSource === button && result && result.url)
+          drag.barDragImageUrl = result.url
+      }, Qt.size(Math.max(1, Math.ceil(item.width)), Math.max(1, Math.ceil(item.height))))
+    }
+
+    function screenPoint(point) {
+      return Qt.point(point.x + offset.x, point.y + offset.y)
+    }
+
+    function updateBarDrag(button, x, y) {
+      var point = button.mapToItem(null, x, y)
+      barDragScreenPoint = screenPoint(point)
+      barDragTarget = null
+      barDragAfter = false
+      barDragIndex = -1
+      barDragTargetGeometry = null
+      var inside = button.mapToItem(bounds, x, y)
+      if (inside.x < 0 || inside.x >= bounds.width || inside.y < 0 || inside.y >= bounds.height) return
+      // Returning to the source icon is a no-op, including an unpinned app.
+      if (x >= 0 && x < button.width && y >= 0 && y < button.height) return
+
+      var along = vertical ? point.y : point.x
+      var bestDistance = Infinity
+      for (var i = 0; i < buttons.count; i++) {
+        var slot = buttons.itemAt(i)
+        if (!slot) continue
+        var start = slot.mapToItem(null, 0, 0)
+        var slotStart = vertical ? start.y : start.x
+        var slotLength = vertical ? slot.height : slot.width
+        var pinIndex = root.pinned.indexOf(slot.app.key)
+        var beforeDistance = Math.abs(along - slotStart)
+        var afterDistance = pinIndex < 0 ? Infinity : Math.abs(along - slotStart - slotLength)
+        var after = afterDistance < beforeDistance
+        var distance = Math.min(beforeDistance, afterDistance)
+        if (distance < bestDistance) {
+          bestDistance = distance
+          barDragTarget = slot
+          barDragAfter = after
+          barDragIndex = pinIndex < 0 ? root.pinned.length : pinIndex + (after ? 1 : 0)
+          var edge = slotStart + (after ? slotLength : 0)
+          var marker = screenPoint(vertical ? Qt.point(start.x, edge) : Qt.point(edge, start.y))
+          var thickness = Style.spacing.xs
+          barDragTargetGeometry = vertical
+            ? { x: marker.x, y: marker.y - thickness / 2, width: slot.width, height: thickness }
+            : { x: marker.x - thickness / 2, y: marker.y, width: thickness, height: slot.height }
+        }
+        // Pins stay first; the first running icon marks the end of them.
+        if (pinIndex < 0) break
+      }
+    }
+  }
+
+  component BarMenu: PopupWindow {
+    required property var bar
+    id: barMenu
+    property string page: "root"
+    property int currentIndex: 0
+    readonly property var items: root.barMenuItems(page)
+    onPageChanged: currentIndex = 0
+    function activate(index) {
+      var item = items[index]
+      if (!item) return
+      if (item.page !== undefined) { page = item.page; return }
+      root.closeMenu()
+      root.saveConfig(item.key, item.value)
+    }
+    visible: false
+    anchor.window: bar.surface
+    anchor.rect.width: 1
+    anchor.rect.height: 1
+    anchor.edges: bar.popupEdge
+    anchor.gravity: bar.popupEdge
+    anchor.margins.top: -Style.space(4)
+    anchor.margins.bottom: -Style.space(4)
+    anchor.margins.left: -Style.space(4)
+    anchor.margins.right: -Style.space(4)
+    implicitWidth: Style.space(238)
+    implicitHeight: settingsColumn.implicitHeight + Style.space(8)
+    color: "transparent"
+
+    Rectangle {
+      anchors.fill: parent
+      focus: true
+      Keys.onEscapePressed: root.closeMenu()
+      Keys.onUpPressed: barMenu.currentIndex = (barMenu.currentIndex + barMenu.items.length - 1) % barMenu.items.length
+      Keys.onDownPressed: barMenu.currentIndex = (barMenu.currentIndex + 1) % barMenu.items.length
+      Keys.onReturnPressed: barMenu.activate(barMenu.currentIndex)
+      Keys.onEnterPressed: barMenu.activate(barMenu.currentIndex)
+      Keys.onLeftPressed: { if (barMenu.page !== "root") barMenu.activate(0) }
+      Keys.onRightPressed: { if (barMenu.items[barMenu.currentIndex].page !== undefined) barMenu.activate(barMenu.currentIndex) }
+      color: Commons.Color.menu.background
+      border.color: Commons.Color.menu.border
+      border.width: Style.normalBorderWidth
+      radius: Style.cornerRadius
+
+      Column {
+        id: settingsColumn
+        anchors.centerIn: parent
+
+        Repeater {
+          model: barMenu.items
+          delegate: MenuRow {
+            required property var modelData
+            required property int index
+            width: barMenu.implicitWidth - Style.space(8)
+            text: modelData.label
+            checkable: modelData.key !== undefined
+            checked: modelData.checked === true
+            highlighted: barMenu.currentIndex === index
+            onHovered: barMenu.currentIndex = index
+            onTriggered: barMenu.activate(index)
+          }
+        }
+      }
+    }
+
+    onVisibleChanged: {
+      if (visible) {
+        page = "root"
+        currentIndex = 0
+        Qt.callLater(function() { settingsGrab.active = barMenu.visible })
+      } else settingsGrab.active = false
+    }
+
+    HyprlandFocusGrab {
+      id: settingsGrab
+      windows: bar.sharedSurface ? [barMenu] : [barMenu, bar.surface]
+      onCleared: if (root.openMenu === barMenu) root.closeMenu()
     }
   }
 
@@ -1075,7 +1378,7 @@ Item {
       return windows.length > 1 ? name + " (" + windows.length + ")" : name
     }
 
-    width: root.barSize + Style.space(8)
+    width: bar.vertical ? bar.thickness : root.barSize + Style.space(8)
     height: root.barSize
 
     Component.onDestruction: if (bar.barDragSource === button) bar.clearBarDrag()
@@ -1118,15 +1421,16 @@ Item {
       }
 
       Rectangle {
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 1
-        anchors.horizontalCenter: parent.horizontalCenter
-        height: 2
+        readonly property int mark: button.focused ? Style.space(12) : Style.space(4)
+        x: bar.vertical ? (bar.popupEdge === Edges.Right ? parent.width - width - 1 : 1) : (parent.width - width) / 2
+        y: bar.vertical ? (parent.height - height) / 2 : parent.height - height - 1
+        width: bar.vertical ? 2 : mark
+        height: bar.vertical ? mark : 2
         radius: 1
-        width: button.focused ? Style.space(12) : Style.space(4)
         visible: button.running
         color: button.focused ? Commons.Color.accent : root.foreground
         Behavior on width { NumberAnimation { duration: 120 } }
+        Behavior on height { NumberAnimation { duration: 120 } }
       }
     }
 
@@ -1183,13 +1487,13 @@ Item {
         }
         if (event.button === Qt.RightButton) {
           if (menu.visible) root.closeMenu()
-          else root.showMenu(menu)
+          else if (!bar.sharedSurface || !root.justClosed(menu)) root.showMenu(menu)
           return
         }
         // Several windows: pick one from the list (it may be on another workspace).
         if (event.button === Qt.LeftButton && button.windows.length > 1) {
           if (windowList.visible) root.closeMenu()
-          else root.showMenu(windowList)
+          else if (!bar.sharedSurface || !root.justClosed(windowList)) root.showMenu(windowList)
           return
         }
         root.closeMenu()
@@ -1211,9 +1515,12 @@ Item {
       id: windowList
       visible: false
       anchor.item: button
-      anchor.edges: Edges.Top
-      anchor.gravity: Edges.Top
+      anchor.edges: bar.popupEdge
+      anchor.gravity: bar.popupEdge
       anchor.margins.top: -Style.space(4)
+      anchor.margins.bottom: -Style.space(4)
+      anchor.margins.left: -Style.space(4)
+      anchor.margins.right: -Style.space(4)
       implicitWidth: windowColumn.implicitWidth + Style.space(8)
       implicitHeight: windowColumn.implicitHeight + Style.space(8)
       color: "transparent"
@@ -1268,7 +1575,7 @@ Item {
 
       HyprlandFocusGrab {
         id: listGrab
-        windows: [windowList, button.QsWindow.window]
+        windows: bar.sharedSurface ? [windowList] : [windowList, button.QsWindow.window]
         onCleared: if (root.openMenu === windowList) root.closeMenu()
       }
     }
@@ -1277,9 +1584,12 @@ Item {
       id: tip
       visible: mouse.containsMouse && !mouse.dragging && !menu.visible && !windowList.visible && !tipDelay.running
       anchor.item: button
-      anchor.edges: Edges.Top
-      anchor.gravity: Edges.Top
+      anchor.edges: bar.popupEdge
+      anchor.gravity: bar.popupEdge
       anchor.margins.top: -Style.space(6)
+      anchor.margins.bottom: -Style.space(6)
+      anchor.margins.left: -Style.space(6)
+      anchor.margins.right: -Style.space(6)
       implicitWidth: tipLabel.implicitWidth + Style.space(16)
       implicitHeight: tipLabel.implicitHeight + Style.space(10)
       color: "transparent"
@@ -1306,9 +1616,12 @@ Item {
       id: menu
       visible: false
       anchor.item: button
-      anchor.edges: Edges.Top
-      anchor.gravity: Edges.Top
+      anchor.edges: bar.popupEdge
+      anchor.gravity: bar.popupEdge
       anchor.margins.top: -Style.space(4)
+      anchor.margins.bottom: -Style.space(4)
+      anchor.margins.left: -Style.space(4)
+      anchor.margins.right: -Style.space(4)
       implicitWidth: menuColumn.implicitWidth + Style.space(8)
       implicitHeight: menuColumn.implicitHeight + Style.space(8)
       color: "transparent"
@@ -1354,7 +1667,7 @@ Item {
 
       HyprlandFocusGrab {
         id: grab
-        windows: [menu, button.QsWindow.window]
+        windows: bar.sharedSurface ? [menu] : [menu, button.QsWindow.window]
         onCleared: if (root.openMenu === menu) root.closeMenu()
       }
     }

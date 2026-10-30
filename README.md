@@ -32,6 +32,10 @@ Click an app with several windows to choose a thumbnail and jump to its workspac
 ## Features
 
 - One bar along the bottom edge of every screen; windows make room for it.
+- Choose the position from the right-click menu: top, right, left, bottom, or
+  **Combine**, which turns it into a module of Omarchy's bar. Drag its margin to
+  place it, right-click the margin for the menu. It grows with its icons up to
+  the next section; size follows Omarchy's bar, and the style still applies.
 - Right-click empty space for Default or Crystal glass style, icon scale and
   a length that grows with the icons. Full length remains the default.
 - Pinned apps first, then any other app you open, centered and growing from

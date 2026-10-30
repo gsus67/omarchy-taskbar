@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.0 — 2026-10-30
+
+- Add **Position** to the bar's menu: **Top**, **Right**, **Left**, **Bottom**
+  (default) and **Combine**. Menus, previews and reordering follow the edge.
+- **Combine** turns the taskbar into a module of Omarchy's bar. Drag its margin
+  to place it between other modules, and right-click the margin for the menu.
+  It grows with its icons until the next section, then scrolls with the wheel.
+  **Size** is hidden there; **Style** still applies.
+
 ## v0.1.1 — 2026-10-28
 
 - Restrict permissions on a verified owned regular legacy launcher before

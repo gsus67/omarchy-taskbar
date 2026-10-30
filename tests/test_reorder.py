@@ -60,9 +60,9 @@ class ReorderTest(unittest.TestCase):
         self.assertIn("Component.onDestruction: if (bar.barDragSource === button) bar.clearBarDrag()", BUTTON)
 
     def test_outside_and_self_drops_do_nothing_and_release_rechecks_position(self):
-        update = BAR[BAR.index("function updateBarDrag("):BAR.index("screen: modelData")]
+        update = BAR[BAR.index("function updateBarDrag("):BAR.index("component BarMenu:")]
         self.assertIn("barDragIndex = -1", update)
-        outside = "if (point.x < 0 || point.x >= width || point.y < 0 || point.y >= height) return"
+        outside = "if (inside.x < 0 || inside.x >= bounds.width || inside.y < 0 || inside.y >= bounds.height) return"
         itself = "if (x >= 0 && x < button.width && y >= 0 && y < button.height) return"
         self.assertIn(outside, update)
         self.assertIn(itself, update)
@@ -75,7 +75,7 @@ class ReorderTest(unittest.TestCase):
 
     def test_captured_ghost_and_marker_reuse_bar_visuals(self):
         self.assertIn("item.grabToImage(function(result)", BAR)
-        self.assertIn("barWindow.barDragSource === button && result && result.url", BAR)
+        self.assertIn("drag.barDragSource === button && result && result.url", BAR)
         self.assertIn("mask: Region {}", GHOST)
         self.assertIn("WlrLayershell.layer: WlrLayer.Overlay", GHOST)
         self.assertIn("WlrLayershell.keyboardFocus: WlrKeyboardFocus.None", GHOST)
@@ -91,14 +91,14 @@ class ReorderTest(unittest.TestCase):
     def test_each_screen_uses_its_own_scaled_geometry(self):
         self.assertIn("property var barDragSource: null", BAR)
         self.assertIn("screen: bar.screen", GHOST)
-        self.assertIn("DragGhostPanel { bar: barWindow }", BAR)
-        self.assertIn("bar: barWindow", BAR)
-        self.assertIn("point.x + margins.left, point.y + screen.height - height", BAR)
+        self.assertIn("DragGhostPanel { bar: barDrag }", BAR)
+        self.assertIn("bar: barDrag", BAR)
+        self.assertIn("point.x + offset.x, point.y + offset.y", BAR)
         self.assertIn("var point = button.mapToItem(null, x, y)", BAR)
-        self.assertIn("appButtons.itemAt(i)", BAR)
+        self.assertIn("buttons.itemAt(i)", BAR)
         self.assertIn("width: thickness, height: slot.height", BAR)
-        self.assertIn("onWidthChanged: clearBarDrag()", BAR)
-        self.assertIn("onHeightChanged: clearBarDrag()", BAR)
+        self.assertIn("onWidthChanged: barDrag.clearBarDrag()", BAR)
+        self.assertIn("onHeightChanged: barDrag.clearBarDrag()", BAR)
         self.assertIn("height: root.barSize", BUTTON)
 
 

@@ -106,7 +106,7 @@ console.log(JSON.stringify(writes));
         menu = SOURCE[SOURCE.index("id: barMenu"):SOURCE.index("component DragGhostPanel:")]
         for action in ("Keys.onEscapePressed", "Keys.onUpPressed", "Keys.onDownPressed", "Keys.onReturnPressed"):
             self.assertIn(action, menu)
-        self.assertIn("windows: [barMenu, barWindow]", menu)
+        self.assertIn("windows: bar.sharedSurface ? [barMenu] : [barMenu, bar.surface]", menu)
         self.assertIn("onCleared: if (root.openMenu === barMenu) root.closeMenu()", menu)
 
     def test_check_mark_has_a_fixed_leading_column(self):
@@ -126,7 +126,7 @@ console.log(JSON.stringify(writes));
                          ["crystal", "default", "default", "default", "default", "default"])
         self.assertIn('root.configuredStyle = root.styleFor(config && config.style)', SOURCE)
 
-    def evaluate(self, expression, spanish=False, style="default", scale=1, width=None):
+    def evaluate(self, expression, spanish=False, style="default", scale=1, width=None, position="bottom"):
         names = ("widthFor", "barMenuItems")
         functions = []
         for name in names:
@@ -140,6 +140,7 @@ console.log(JSON.stringify(writes));
             "const configuredStyle=" + json.dumps(style) + ";"
             "const configuredScale=" + json.dumps(scale) + ";"
             "const configuredWidth=" + json.dumps(width) + ";"
+            "const configuredPosition=" + json.dumps(position) + ";"
             'const crystal=configuredStyle === "crystal";'
             'const Qt={locale:()=>({decimalPoint: spanish ? "," : "."})};'
             'function t(en, es) {return spanish ? es : en;}\n'
@@ -150,8 +151,8 @@ console.log(JSON.stringify(writes));
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed to run QML JavaScript")
     def test_menu_language_choices_and_active_values(self):
-        self.assertEqual([row["label"] for row in self.evaluate('barMenuItems("root")')], ["Style  ›", "Size  ›"])
-        self.assertEqual([row["label"] for row in self.evaluate('barMenuItems("root")', spanish=True)], ["Estilo  ›", "Tamaño  ›"])
+        self.assertEqual([row["label"] for row in self.evaluate('barMenuItems("root")')], ["Style  ›", "Position  ›", "Size  ›"])
+        self.assertEqual([row["label"] for row in self.evaluate('barMenuItems("root")', spanish=True)], ["Estilo  ›", "Posición  ›", "Tamaño  ›"])
         self.assertEqual([row.get("page") for row in self.evaluate('barMenuItems("size")')], ["root", "length", "scale"])
         self.assertEqual([row.get("page") for row in self.evaluate('barMenuItems("size")', style="crystal")], ["root", "length", "scale"])
         self.assertEqual([row["label"] for row in self.evaluate('barMenuItems("size")', spanish=True)[1:]], ["Largo  ›", "Ancho  ›"])
@@ -168,7 +169,7 @@ console.log(JSON.stringify(writes));
         self.assertTrue(self.evaluate('barMenuItems("length")', width="10%")[-1]["checked"])
 
     def test_scale_multiplies_bar_height_and_icons(self):
-        self.assertIn("readonly property int barSize: Math.round(Style.bar.sizeHorizontal * configuredScale)", SOURCE)
+        self.assertIn("readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))", SOURCE)
         self.assertIn("readonly property int iconSize: Math.round(barSize * 0.66)", SOURCE)
         self.assertIn("implicitHeight: root.barSize", SOURCE)
 
@@ -194,7 +195,7 @@ console.log(JSON.stringify(writes));
             'widthFor("10%", 1000, 40, false, 400)]')
         self.assertEqual(result, [1000, 200, 450, 200, 1000, 968, 450, 968, 1000, 80, 18, 100, 400])
         self.assertIn("appRow.implicitWidth", SOURCE)
-        self.assertIn("screen.height - height - margins.bottom", SOURCE)
+        self.assertIn("modelData.height - barWindow.height - barWindow.margins.bottom", SOURCE)
         self.assertIn("appViewport.contentX", SOURCE)
 
 

@@ -2,15 +2,17 @@
   "schemaVersion": 1,
   "id": "io.github.gsus67.omarchy-taskbar",
   "name": "Omarchy Taskbar",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Omarchy Taskbar contributors",
   "license": "MIT",
-  "description": "A native bottom taskbar with pinned and running apps, Default and Crystal styles, adjustable size, and private imported launchers.",
+  "description": "A native taskbar with pinned and running apps, Default and Crystal styles, any screen edge or combined with the Omarchy bar, adjustable size, and private imported launchers.",
   "kinds": [
-    "panel"
+    "panel",
+    "bar-widget"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "panel": "Taskbar.qml"
+    "panel": "Taskbar.qml",
+    "barWidget": "BarWidget.qml"
   }
 }

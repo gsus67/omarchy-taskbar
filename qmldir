@@ -1,0 +1,4 @@
+singleton Bridge 1.0 Bridge.qml
+BarWidget 1.0 BarWidget.qml
+CrystalSurface 1.0 CrystalSurface.qml
+Taskbar 1.0 Taskbar.qml

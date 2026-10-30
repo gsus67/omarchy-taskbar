@@ -33,6 +33,11 @@ Al pulsar una app con varias ventanas, puedes elegir una miniatura para abrirla 
 ## Funciones
 
 - Una barra en el borde inferior de cada pantalla; las ventanas le dejan sitio.
+- La posición se elige en el menú del clic derecho: arriba, derecha, izquierda,
+  abajo o **Combinar**, que la convierte en un módulo de la barra de Omarchy.
+  Arrastra su margen para colocarla y haz clic derecho en él para abrir el menú.
+  Crece con sus iconos hasta la siguiente sección; el tamaño sigue a la barra de
+  Omarchy y el estilo se sigue aplicando.
 - Primero las apps ancladas y después cualquier otra que abras, centradas y
   creciendo desde el medio.
 - Una marca corta debajo de las apps con ventanas abiertas; la app con el foco

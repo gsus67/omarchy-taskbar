@@ -48,12 +48,15 @@ class ShellCommandTest(unittest.TestCase):
 
     def test_focus_dispatch_only_takes_a_checked_hex_address(self):
         # The window address is placed inside a Hyprland Lua dispatch, so it
-        # must be validated as hex right before it is used.
-        dispatch = SOURCE.find('"hyprctl", "dispatch"')
-        self.assertNotEqual(dispatch, -1)
-        guard = SOURCE.rfind("/^0x[0-9a-fA-F]+$/.test(address)", 0, dispatch)
-        self.assertNotEqual(guard, -1, "hyprctl dispatch without the hex address check")
-        self.assertLess(dispatch - guard, 200, "the address check must sit right before the dispatch")
+        # must be validated before the request is queued for dispatch.
+        focus = re.search(r"  function focusWindow\([^\n]*\) \{.*?\n  \}", SOURCE, re.S)
+        self.assertIsNotNone(focus)
+        body = focus.group()
+        guard = body.find("/^0x[0-9a-fA-F]+$/.test(address)")
+        queued = body.find("root.focusRequests")
+        self.assertNotEqual(guard, -1, "focus dispatch without the hex address check")
+        self.assertNotEqual(queued, -1, "checked address is not queued for dispatch")
+        self.assertLess(guard, queued, "the address must be checked before it is queued")
 
 
     def test_never_reads_command_lines(self):

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — v0.2.1
+
+- Hide the active Hyprland special workspace before focusing a taskbar window
+  outside it, while leaving the workspace open when its own window is chosen.
+
 ## v0.2.0 — 2026-10-30
 
 - Add **Position** to the bar's menu: **Top**, **Right**, **Left**, **Bottom**

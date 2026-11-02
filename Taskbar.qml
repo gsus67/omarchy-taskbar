@@ -600,8 +600,8 @@ Item {
     var current = -1
     for (var i = 0; i < windows.length; i++)
       if (windows[i].activated) current = i
-    if (current === -1) windows[0].activate()
-    else if (windows.length > 1) windows[(current + 1) % windows.length].activate()
+    if (current === -1) focusWindow(windows[0])
+    else if (windows.length > 1) focusWindow(windows[(current + 1) % windows.length])
   }
 
   // Hyprland's view of a window: its workspace and address.
@@ -616,15 +616,112 @@ Item {
     return hypr && hypr.workspace ? String(hypr.workspace.name) : ""
   }
 
-  // Jumps to one window, switching to its workspace. The address comes from
+  function specialWorkspaceForMonitor(monitors, targetMonitor) {
+    if (!Array.isArray(monitors)) return ""
+    var monitor = null
+    if (targetMonitor !== "")
+      for (var i = 0; i < monitors.length; i++)
+        if (String(monitors[i].name || "") === targetMonitor) monitor = monitors[i]
+    if (!monitor)
+      for (var j = 0; j < monitors.length; j++)
+        if (monitors[j].focused === true) monitor = monitors[j]
+    var special = monitor ? monitor.specialWorkspace : null
+    var name = special && Number(special.id) !== 0 ? String(special.name || "") : ""
+    return /^special:[A-Za-z0-9._-]+$/.test(name) ? name : ""
+  }
+
+  property var focusRequests: []
+  property var activeFocusRequest: null
+
+  function dispatchFocus(request, monitors) {
+    var special = root.specialWorkspaceForMonitor(monitors, request.monitor)
+    if (special !== "" && special !== request.workspace)
+      Hyprland.dispatch('hl.dsp.workspace.toggle_special("' + special.slice(8) + '")')
+    Hyprland.dispatch('hl.dsp.focus({ window = "address:' + request.address + '" })')
+  }
+
+  function startNextFocus() {
+    if (focusMonitorQuery.running || root.activeFocusRequest !== null
+        || root.focusRequests.length === 0) return
+    root.activeFocusRequest = root.focusRequests[0]
+    root.focusRequests = root.focusRequests.slice(1)
+    focusMonitorQuery.hasExited = false
+    focusMonitorQuery.streamFinished = false
+    focusMonitorQuery.querySucceeded = false
+    focusMonitorQuery.output = ""
+    focusMonitorQuery.running = true
+  }
+
+  function finishFocus(monitorsJson, querySucceeded) {
+    var request = root.activeFocusRequest
+    if (request === null) return
+    var monitors = []
+    if (querySucceeded) {
+      try {
+        var parsed = JSON.parse(monitorsJson)
+        if (Array.isArray(parsed)) monitors = parsed
+      } catch (e) {}
+    }
+    root.dispatchFocus(request, monitors)
+    root.activeFocusRequest = null
+    root.startNextFocus()
+  }
+
+  function completeFocusQuery() {
+    if (root.activeFocusRequest !== null) {
+      if (focusMonitorQuery.hasExited && focusMonitorQuery.streamFinished)
+        root.finishFocus(focusMonitorQuery.output, focusMonitorQuery.querySucceeded)
+      else if (!focusMonitorQuery.running && !focusMonitorQuery.hasExited)
+        root.finishFocus("", false)
+    }
+    if (root.activeFocusRequest === null && !focusMonitorQuery.running)
+      root.startNextFocus()
+  }
+
+  // Jumps to one window, switching to its workspace. A visible scratchpad is
+  // hidden first unless the target belongs to it. The address comes from
   // Hyprland and is checked to be hex before it goes into the dispatch.
   function focusWindow(toplevel) {
     var hypr = hyprlandOf(toplevel)
     var address = hypr ? String(hypr.address) : ""
     if (!/^0x/.test(address)) address = "0x" + address
-    if (/^0x[0-9a-fA-F]+$/.test(address))
-      Quickshell.execDetached(["hyprctl", "dispatch", 'hl.dsp.focus({ window = "address:' + address + '" })'])
-    else toplevel.activate()
+    if (!/^0x[0-9a-fA-F]+$/.test(address)) {
+      toplevel.activate()
+      return
+    }
+    var workspace = hypr && hypr.workspace ? String(hypr.workspace.name) : ""
+    var monitor = hypr && hypr.monitor ? String(hypr.monitor.name || "") : ""
+    root.focusRequests = root.focusRequests.concat([{
+      address: address,
+      workspace: workspace,
+      monitor: monitor
+    }])
+    root.startNextFocus()
+  }
+
+  // Query at click time: cached lastIpcObject data can be stale, and toggling
+  // from stale state would reopen a scratchpad that has already been hidden.
+  Process {
+    id: focusMonitorQuery
+    command: ["hyprctl", "monitors", "-j"]
+    property bool hasExited: false
+    property bool streamFinished: false
+    property bool querySucceeded: false
+    property string output: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        focusMonitorQuery.output = text
+        focusMonitorQuery.streamFinished = true
+        root.completeFocusQuery()
+      }
+    }
+    onExited: function(exitCode, exitStatus) {
+      hasExited = true
+      querySucceeded = exitCode === 0 && exitStatus === 0
+      root.completeFocusQuery()
+    }
+    onRunningChanged: root.completeFocusQuery()
   }
 
   function closeAll(app) {

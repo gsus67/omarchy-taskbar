@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Dialogs
+import QtCore
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -364,8 +366,21 @@ Item {
     if (!match) return ""
     try {
       var path = decodeURIComponent(match[1])
-      return /[\x00-\x1f\x7f-\x9f]/.test(path) ? "" : path
+      return path !== "/" && !/[\x00-\x1f\x7f-\x9f]/.test(path) ? path : ""
     } catch (e) { return "" }
+  }
+
+  FileDialog {
+    id: iconFileDialog
+    property string appKey: ""
+    title: root.t("Choose an icon", "Elegir un icono")
+    fileMode: FileDialog.OpenFile
+    currentFolder: StandardPaths.writableLocation(StandardPaths.PicturesLocation)
+    nameFilters: ["Icon files (*.png *.PNG *.svg *.SVG *.ico *.ICO *.exe *.EXE)"]
+    onAccepted: {
+      var path = root.droppedPath(selectedFile)
+      if (path !== "") root.queuePinChange("icon", appKey, path)
+    }
   }
 
   function iconErrorMessage(code) {
@@ -1730,6 +1745,16 @@ Item {
             text: root.isPinned(button.app.key) ? root.t("Unpin", "Desanclar") : root.t("Pin", "Anclar")
             shown: root.canPin(button.app) || root.isPinned(button.app.key)
             onTriggered: { root.closeMenu(); root.togglePin(button.app.key) }
+          }
+          MenuRow {
+            text: root.t("Change icon…", "Cambiar icono…")
+            shown: root.isPinned(button.app.key)
+            onTriggered: { iconFileDialog.appKey = button.app.key; iconFileDialog.open(); root.closeMenu() }
+          }
+          MenuRow {
+            text: root.t("Restore icon", "Restaurar icono")
+            shown: typeof root.customIcons[button.app.key] === "string"
+            onTriggered: { root.queuePinChange("unicon", button.app.key, ""); root.closeMenu() }
           }
           MenuRow {
             text: root.t("New window", "Nueva ventana")

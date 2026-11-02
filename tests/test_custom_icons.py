@@ -1,5 +1,8 @@
 """Static guards for loading and preferring private pinned-app icons."""
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -19,6 +22,12 @@ def file_view(name):
     if match is None:
         raise AssertionError(f"missing FileView {name}")
     return match.group(1)
+
+
+def app_menu():
+    start = SOURCE.index("      id: menu", SOURCE.index("component AppButton:"))
+    end = SOURCE.index("  // A row of the window list:", start)
+    return SOURCE[start:end]
 
 
 class CustomIconsTest(unittest.TestCase):
@@ -102,6 +111,116 @@ class CustomIconsTest(unittest.TestCase):
         self.assertIn("pinChangeProc.streamSeen = true", body)
         self.assertIn("pinChangeProc.exitSeen = true", body)
         self.assertGreaterEqual(body.count("root.finishPinChange()"), 2)
+
+    def test_pinned_app_menu_shows_only_applicable_icon_actions(self):
+        menu = app_menu()
+        self.assertIn('text: root.t("Change icon…", "Cambiar icono…")', menu)
+        self.assertIn("shown: root.isPinned(button.app.key)", menu)
+        self.assertIn('text: root.t("Restore icon", "Restaurar icono")', menu)
+        self.assertIn(
+            'shown: typeof root.customIcons[button.app.key] === "string"', menu
+        )
+        menu_row = SOURCE[SOURCE.index("  component MenuRow:") :]
+        self.assertGreaterEqual(menu_row.count("textFormat: Text.PlainText"), 2)
+
+    def test_icon_actions_run_before_the_popup_closes_without_a_shell(self):
+        menu = app_menu()
+        change = re.search(
+            r'text: root\.t\("Change icon…".*?onTriggered:\s*\{(.*?)\}',
+            menu,
+            re.S,
+        )
+        restore = re.search(
+            r'text: root\.t\("Restore icon".*?onTriggered:\s*\{(.*?)\}',
+            menu,
+            re.S,
+        )
+        self.assertIsNotNone(change)
+        self.assertIsNotNone(restore)
+        self.assertLess(
+            change.group(1).index("iconFileDialog.appKey = button.app.key"),
+            change.group(1).index("iconFileDialog.open()"),
+        )
+        self.assertLess(
+            change.group(1).index("iconFileDialog.open()"),
+            change.group(1).index("root.closeMenu()"),
+        )
+        self.assertLess(
+            restore.group(1).index('root.queuePinChange("unicon", button.app.key, "")'),
+            restore.group(1).index("root.closeMenu()"),
+        )
+        for forbidden in ("Process", "execDetached", "bash", "zenity"):
+            self.assertNotIn(forbidden, change.group(1) + restore.group(1))
+
+    def test_root_file_dialog_captures_the_app_key_without_closing_other_menus(self):
+        self.assertIn("import QtQuick.Dialogs", SOURCE)
+        self.assertIn("import QtCore", SOURCE)
+        self.assertEqual(SOURCE.count("FileDialog {"), 1)
+        dialog = re.search(r"  FileDialog \{\s*id: iconFileDialog\b(.*?)\n  \}", SOURCE, re.S)
+        self.assertIsNotNone(dialog)
+        body = dialog.group(1)
+        for extension in ("*.png", "*.svg", "*.ico", "*.exe"):
+            self.assertIn(extension, body)
+        self.assertIn(
+            "currentFolder: StandardPaths.writableLocation(StandardPaths.PicturesLocation)",
+            body,
+        )
+        self.assertIn('property string appKey: ""', body)
+        self.assertIn("var path = root.droppedPath(selectedFile)", body)
+        self.assertIn('root.queuePinChange("icon", appKey, path)', body)
+        self.assertNotIn("button.app.key", body)
+        self.assertNotIn("root.closeMenu()", body)
+        self.assertNotIn("onRejected:", body)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to run QML JavaScript")
+    def test_file_url_conversion_accepts_only_safe_decoded_local_paths(self):
+        converter = "function droppedPath(url) {" + function("droppedPath") + "\n}"
+        values = [
+            "file:///home/user/icon%20one.png",
+            "file:///home/user/a+icon.svg",
+            "https://example.test/icon.png",
+            "file://server/share/icon.png",
+            "file:///",
+            "file:///tmp/bad%0Aicon.png",
+            "file:///tmp/bad%0Dicon.png",
+            "file:///tmp/bad%00icon.png",
+            "file:///tmp/bad%1Bicon.png",
+            "file:///tmp/bad%09icon.png",
+            "file:///tmp/bad%7Ficon.png",
+            "file:///tmp/%ZZ.png",
+            "",
+        ]
+        code = (
+            converter
+            + "\nconsole.log(JSON.stringify("
+            + json.dumps(values)
+            + ".map(droppedPath)));"
+        )
+        result = subprocess.run(  # noqa: S603
+            [shutil.which("node"), "-e", code],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        self.assertEqual(
+            json.loads(result.stdout),
+            [
+                "/home/user/icon one.png",
+                "/home/user/a+icon.svg",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+        )
 
 
 if __name__ == "__main__":

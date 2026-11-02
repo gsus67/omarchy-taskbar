@@ -24,6 +24,7 @@ Item {
 
   readonly property bool spanish: Qt.locale().name.indexOf("es") === 0
   function t(english, spanishText) { return spanish ? spanishText : english }
+  function newDictionary(source) { return Object.assign(Object.create(null), source || Object.create(null)) }
 
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
   readonly property string pluginDirectory: decodeURIComponent(
@@ -31,12 +32,13 @@ Item {
   readonly property string pinsPath: configHome + "/omarchy-taskbar/pinned.json"
   readonly property string iconsMapPath: configHome + "/omarchy-taskbar/pinned-icons.json"
   readonly property string iconsDirectory: configHome + "/omarchy-taskbar/icons"
+  readonly property int maxCustomIcons: 1024
   readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))
   readonly property int iconSize: Math.round(barSize * 0.66)
   readonly property color foreground: Commons.Color.bar.text
 
   property var pinned: []
-  property var customIcons: ({})
+  property var customIcons: Object.create(null)
   property bool transparent: false
   property var configuredWidth: null
   property real configuredScale: 1
@@ -119,13 +121,13 @@ Item {
         root.configuredStyle = root.styleFor(config && config.style)
         root.configuredPosition = root.positionFor(config && config.position)
         if (!configWriter.running && root.configWrites.length === 0)
-          root.configSnapshot = config && typeof config === "object" && !Array.isArray(config) ? config : ({})
+          root.configSnapshot = config && typeof config === "object" && !Array.isArray(config) ? root.newDictionary(config) : root.newDictionary()
       } catch (e) {
         root.configuredWidth = null
         root.configuredScale = 1
         root.configuredStyle = "default"
         root.configuredPosition = "bottom"
-        if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = ({})
+        if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = root.newDictionary()
       }
     }
     onLoadFailed: {
@@ -133,7 +135,7 @@ Item {
       root.configuredScale = 1
       root.configuredStyle = "default"
       root.configuredPosition = "bottom"
-      if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = ({})
+      if (!configWriter.running && root.configWrites.length === 0) root.configSnapshot = root.newDictionary()
     }
   }
 
@@ -187,7 +189,7 @@ Item {
     if (key === "position" && value !== null && root.positionFor(value) !== value) return
     if (key === "scale" && value !== null && root.scaleFor(value) !== value) return
     if (key === "width" && value !== null && ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"].indexOf(value) === -1) return
-    var config = {}
+    var config = root.newDictionary()
     try {
       var parsed = root.configSnapshot === null ? JSON.parse(configFile.text()) : root.configSnapshot
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) config = Object.assign(Object.create(null), parsed)
@@ -212,9 +214,11 @@ Item {
     id: configWriter
     property string payload: ""
     command: ["bash", "-c",
-      'if [[ -z $2 ]]; then rm -f -- "$1"; else '
-      + 'mkdir -p -- "${1%/*}" || exit; tmp=$(mktemp -- "$1.XXXXXX") || exit; '
-      + 'trap \'rm -f -- "$tmp"\' EXIT; printf "%s\\n" "$2" >"$tmp" && mv -f -- "$tmp" "$1"; fi',
+      '# shellcheck disable=SC2174\n'
+      + 'if [[ -z $2 ]]; then rm -f -- "$1"; else '
+      + 'umask 077; dir=${1%/*}; mkdir -p -m 700 -- "$dir" || exit; chmod 700 -- "$dir" || exit; '
+      + 'tmp=$(mktemp -- "$dir/.config.XXXXXX") || exit; trap \'rm -f -- "$tmp"\' EXIT; '
+      + 'printf "%s\\n" "$2" >"$tmp" && chmod 600 -- "$tmp" && mv -fT -- "$tmp" "$1"; fi',
       "omarchy-taskbar", configFile.path, payload]
     onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0 || exitStatus !== 0) {
@@ -264,7 +268,8 @@ Item {
       try {
         var parsed = JSON.parse(text())
         var icons = Object.create(null)
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            && Object.keys(parsed).length <= root.maxCustomIcons) {
           Object.keys(parsed).forEach(function(key) {
             var value = parsed[key]
             if (typeof value !== "string" || !/^[0-9a-f]{16}-[A-Za-z0-9]{6}\.png$/.test(value)) return
@@ -275,10 +280,10 @@ Item {
         }
         root.customIcons = icons
       } catch (e) {
-        root.customIcons = ({})
+        root.customIcons = root.newDictionary()
       }
     }
-    onLoadFailed: root.customIcons = ({})
+    onLoadFailed: root.customIcons = root.newDictionary()
   }
 
   // First run: pin the default browser (the real one behind Omarchy's
@@ -303,7 +308,11 @@ Item {
 
   function savePins(list) {
     root.pinned = list
-    Quickshell.execDetached(["bash", "-c", 'mkdir -p -- "${1%/*}" && printf "%s\\n" "$2" >"$1"',
+    Quickshell.execDetached(["bash", "-c",
+      '# shellcheck disable=SC2174\n'
+      + 'umask 077; dir=${1%/*}; mkdir -p -m 700 -- "$dir" && chmod 700 -- "$dir" || exit; '
+      + 'tmp=$(mktemp -- "$dir/.pinned.XXXXXX") || exit; trap \'rm -f -- "$tmp"\' EXIT; '
+      + 'printf "%s\\n" "$2" >"$tmp" && chmod 600 -- "$tmp" && mv -fT -- "$tmp" "$1"',
       "omarchy-taskbar", root.pinsPath, JSON.stringify(list, null, 2)])
   }
 
@@ -417,7 +426,9 @@ Item {
     property bool streamSeen: false
     property bool busy: false
     command: ["bash", "-c",
-      'case "$1" in icon) "$BASH" "$5" "$1" "$2" "$4" ;; unicon) "$BASH" "$5" "$1" "$2" "" ;; *) "$BASH" "$5" "$1" "$2" "$3" ;; esac',
+      'case "$1" in icon) timeout -k 2 30 "$BASH" "$5" "$1" "$2" "$4" ;; '
+      + 'unicon) timeout -k 2 30 "$BASH" "$5" "$1" "$2" "" ;; '
+      + '*) timeout -k 2 30 "$BASH" "$5" "$1" "$2" "$3" ;; esac',
       "omarchy-taskbar", operation, value, applicationIds, path,
       root.pluginDirectory + "/bin/pin-file.sh"]
     stdout: StdioCollector {
@@ -447,7 +458,7 @@ Item {
   // browser. Their desktop entries launch omarchy-launch-webapp (or --app=)
   // with the URL, so the host links each window to its own entry and icon.
   readonly property var webApps: {
-    var map = ({})
+    var map = root.newDictionary()
     DesktopEntries.applications.values.forEach(function(entry) {
       var exec = String(entry.execString || "")
       if (exec.indexOf("omarchy-launch-webapp") === -1 && exec.indexOf("--app=") === -1) return
@@ -460,7 +471,7 @@ Item {
   // Omarchy's own web app handlers (omarchy-webapp-handler-hey, -zoom…) keep
   // the URL in the script: their name is matched against the host's labels.
   readonly property var webHandlers: {
-    var map = ({})
+    var map = root.newDictionary()
     DesktopEntries.applications.values.forEach(function(entry) {
       var first = String((entry.command || [])[0] || "").split("/").pop()
       if (first.indexOf("omarchy-webapp-handler-") === 0) map[first.slice(23).toLowerCase()] = entry
@@ -484,7 +495,7 @@ Item {
   // Used to find the entry of a script that opened a window under another
   // program (e.g. omarchy-windows-vm opening xfreerdp).
   readonly property var programs: {
-    var map = ({})
+    var map = root.newDictionary()
     DesktopEntries.applications.values.forEach(function(entry) {
       var words = (entry.command || []).map(String)
       // Skip launchers, their options (env --unset=X) and VAR=value pairs.
@@ -626,7 +637,7 @@ Item {
 
   readonly property var apps: {
     var list = []
-    var seen = ({})
+    var seen = root.newDictionary()
     DesktopEntries.applications.values // re-evaluate when apps are installed
     root.pinned.forEach(function(id) {
       // A pinned program without a desktop entry is kept as its path.
@@ -735,8 +746,8 @@ Item {
 
   // Ported from Omarchy's shell/services/AppLibrary.qml: panel plugins do
   // not receive shell.appLibrary. The index bypasses stale theme caches.
-  property var iconIndex: ({})
-  property var pendingIconIndex: ({})
+  property var iconIndex: Object.create(null)
+  property var pendingIconIndex: Object.create(null)
 
   function iconSource(icon) {
     var value = String(icon || "")
@@ -792,7 +803,7 @@ Item {
       + 'done; find "$3" -maxdepth 1 -name "*.$ext" 2>/dev/null; done', "omarchy-taskbar",
       Quickshell.env("HOME"), Quickshell.env("XDG_DATA_DIRS") || "/usr/local/share:/usr/share", "/usr/share/pixmaps"]
     stdout: SplitParser { onRead: function(line) { root.indexIconLine(line) } }
-    onStarted: root.pendingIconIndex = ({})
+    onStarted: root.pendingIconIndex = root.newDictionary()
     // Replace the property only when complete, re-evaluating icon bindings.
     onExited: root.iconIndex = root.pendingIconIndex
   }
@@ -817,7 +828,7 @@ Item {
   // A window whose class has no desktop entry (e.g. `foot --app-id=x`) borrows
   // the icon, entry and program of the process behind it: { icon, entry, exe }.
   // Asked once per class.
-  property var fallbacks: ({})
+  property var fallbacks: Object.create(null)
   property var iconQueue: []
 
   function lookupIcon(appId) {
@@ -868,7 +879,7 @@ Item {
             if (parents[i] in root.programs) entry = root.programs[parents[i]]
         }
         var exe = (lines[1] || "").trim()
-        var known = Object.assign({}, root.fallbacks)
+        var known = root.newDictionary(root.fallbacks)
         known[iconProc.appId] = {
           icon: entry && entry.icon ? entry.icon : "",
           entry: entry ? entry.id : "",

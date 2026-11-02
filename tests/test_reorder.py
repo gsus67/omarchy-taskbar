@@ -1,7 +1,13 @@
 """Static guards for app dragging; the layer windows need a Wayland session."""
+import json
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+
+from extract_shell import scripts
 
 SOURCE = (Path(__file__).resolve().parent.parent / "Taskbar.qml").read_text()
 BAR = SOURCE[SOURCE.index("id: barWindow"):SOURCE.index("component DragGhostPanel:")]
@@ -25,6 +31,41 @@ class ReorderTest(unittest.TestCase):
         self.assertNotIn("execDetached", move)
         self.assertNotIn("queuePinChange", move)
         self.assertIn("if (wasDragging && index >= 0) root.movePin(button.app, index)", POINTER)
+
+    def test_pin_writer_replaces_atomically_with_private_permissions(self):
+        save = re.search(r"  function savePins\(list\) \{(.*?)\n  \}", SOURCE, re.S)
+        self.assertIsNotNone(save)
+        script, = [script for _, script in scripts(save.group(1))]
+        bash = shutil.which("bash")
+        with tempfile.TemporaryDirectory(prefix="taskbar-pins-") as directory:
+            path = Path(directory) / "config dir" / "pinned.json"
+
+            def command(payload):
+                return [bash, "-c", 'umask 000; exec "$@"', "pin-writer",
+                        bash, "-c", script, "omarchy-taskbar", str(path), payload]
+
+            first = json.dumps(["one", "__proto__", "constructor"])
+            result = subprocess.run(  # noqa: S603 - command is a fixed extracted test script
+                command(first), capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(path.read_text(), first + "\n")
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            first_inode = path.stat().st_ino
+
+            payloads = [json.dumps([f"app-{index}", "toString"]) for index in range(8)]
+            processes = [subprocess.Popen(  # noqa: S603 - fixed script with test-owned data
+                command(payload), stdout=subprocess.PIPE,
+                                          stderr=subprocess.PIPE, text=True)
+                         for payload in payloads]
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=5)
+                self.assertEqual(process.returncode, 0, stderr)
+                self.assertEqual(stdout, "")
+            self.assertIn(path.read_text().rstrip("\n"), payloads)
+            self.assertNotEqual(path.stat().st_ino, first_inode)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_unpinned_apps_can_start_a_drag_and_be_inserted(self):
         self.assertIn("(!root.isPinned(button.app.key) && !root.canPin(button.app))", POINTER)

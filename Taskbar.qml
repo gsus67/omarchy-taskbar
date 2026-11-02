@@ -334,16 +334,29 @@ Item {
   // race a drop that is still creating its desktop entry.
   property var pinChanges: []
 
-  function queuePinChange(operation, value) {
-    root.pinChanges = root.pinChanges.concat([{ operation: operation, value: value }])
-    if (!pinChangeProc.running) nextPinChange()
+  function queuePinChange(operation, value, path) {
+    root.pinChanges = root.pinChanges.concat([{ operation: operation, value: value, path: path || "" }])
+    if (!pinChangeProc.busy) nextPinChange()
   }
 
   function nextPinChange() {
     if (root.pinChanges.length === 0) return
-    pinChangeProc.change = root.pinChanges[0]
+    var change = root.pinChanges[0]
     root.pinChanges = root.pinChanges.slice(1)
+    pinChangeProc.operation = change.operation
+    pinChangeProc.value = change.value
+    pinChangeProc.path = change.path
+    pinChangeProc.applicationIds = JSON.stringify(DesktopEntries.applications.values.map(function(entry) { return String(entry.id) }))
+    pinChangeProc.exitSeen = false
+    pinChangeProc.streamSeen = false
+    pinChangeProc.busy = true
     pinChangeProc.running = true
+  }
+
+  function finishPinChange() {
+    if (!pinChangeProc.exitSeen || !pinChangeProc.streamSeen) return
+    pinChangeProc.busy = false
+    nextPinChange()
   }
 
   function droppedPath(url) {
@@ -355,19 +368,61 @@ Item {
     } catch (e) { return "" }
   }
 
+  function iconErrorMessage(code) {
+    switch (code) {
+    case "key": return root.t("This app cannot have a custom icon.", "Esta aplicación no admite un icono personalizado.")
+    case "source": return root.t("The selected icon cannot be read.", "No se puede leer el icono seleccionado.")
+    case "size": return root.t("The selected icon is too large.", "El icono seleccionado es demasiado grande.")
+    case "type": return root.t("The selected file is not a supported icon.", "El archivo seleccionado no es un icono compatible.")
+    case "dimensions": return root.t("The selected icon dimensions are too large.", "Las dimensiones del icono seleccionado son demasiado grandes.")
+    case "extract": return root.t("The icon could not be extracted.", "No se pudo extraer el icono.")
+    case "svg": return root.t("The selected SVG is not safe to use.", "El SVG seleccionado no es seguro.")
+    case "busy": return root.t("Another icon change is still in progress.", "Todavía hay otro cambio de icono en curso.")
+    case "tool": return root.t("A required icon tool is unavailable.", "No está disponible una herramienta necesaria para el icono.")
+    case "storage": return root.t("The icon storage directory is unavailable.", "El directorio de iconos no está disponible.")
+    case "map": return root.t("The custom icon map could not be updated.", "No se pudo actualizar el mapa de iconos personalizados.")
+    case "temp": return root.t("A temporary icon file could not be prepared.", "No se pudo preparar un archivo temporal para el icono.")
+    case "usage": return root.t("The icon change request was invalid.", "La solicitud de cambio de icono no era válida.")
+    default: return root.t("The custom icon could not be changed.", "No se pudo cambiar el icono personalizado.")
+    }
+  }
+
+  function notifyIconError(code) {
+    Quickshell.execDetached(["notify-send", root.t("Icon change failed", "Error al cambiar el icono"),
+      root.iconErrorMessage(code)])
+  }
+
   Process {
     id: pinChangeProc
-    property var change: ({ operation: "", value: "" })
-    command: ["bash", root.pluginDirectory + "/bin/pin-file.sh", change.operation, change.value,
-      JSON.stringify(DesktopEntries.applications.values.map(function(entry) { return String(entry.id) }))]
+    property string operation: ""
+    property string value: ""
+    property string path: ""
+    property string applicationIds: "[]"
+    property bool exitSeen: false
+    property bool streamSeen: false
+    property bool busy: false
+    command: ["bash", "-c",
+      'case "$1" in icon) "$BASH" "$5" "$1" "$2" "$4" ;; unicon) "$BASH" "$5" "$1" "$2" "" ;; *) "$BASH" "$5" "$1" "$2" "$3" ;; esac',
+      "omarchy-taskbar", operation, value, applicationIds, path,
+      root.pluginDirectory + "/bin/pin-file.sh"]
     stdout: StdioCollector {
       onStreamFinished: {
-        var id = text.replace(/\n$/, "")
-        if (pinChangeProc.change.operation === "add" && id !== "" && !/[\x00-\x1f\x7f-\x9f]/.test(id)
-            && !root.isPinned(id)) root.savePins(root.pinned.concat([id]))
+        var operation = pinChangeProc.operation
+        var result = text.split(/\r?\n/, 1)[0].trim()
+        var iconOperation = operation === "icon" || operation === "unicon"
+        var error = iconOperation ? /^error:([A-Za-z0-9_-]+)$/.exec(result) : null
+        if (error) root.notifyIconError(error[1])
+        else if (operation === "add" && result !== "" && !/[\x00-\x1f\x7f-\x9f]/.test(result)
+            && !root.isPinned(result)) root.savePins(root.pinned.concat([result]))
+        else if (iconOperation && result === "ok") iconsFile.reload()
+        pinChangeProc.streamSeen = true
+        root.finishPinChange()
       }
     }
-    onExited: root.nextPinChange()
+    onExited: {
+      pinChangeProc.exitSeen = true
+      root.finishPinChange()
+    }
   }
 
   // ------------------------------------------------------------ apps model

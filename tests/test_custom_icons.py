@@ -60,6 +60,49 @@ class CustomIconsTest(unittest.TestCase):
         self.assertIn(fallback, resolver)
         self.assertLess(resolver.index(custom), resolver.index(fallback))
 
+    def test_icon_map_reloads_only_after_successful_icon_changes(self):
+        collector = re.search(
+            r"id: pinChangeProc\b.*?stdout:\s*StdioCollector\s*\{(.*?)\n\s*\}\n\s*onExited:",
+            SOURCE,
+            re.S,
+        )
+        self.assertIsNotNone(collector)
+        body = collector.group(1)
+        self.assertRegex(body, r'operation === "icon"\s*\|\|\s*operation === "unicon"')
+        self.assertRegex(body, r'result === "ok"[^\n]*iconsFile\.reload\(\)')
+
+    def test_stdout_uses_captured_operation_and_scopes_complete_icon_errors(self):
+        process = re.search(
+            r"Process\s*\{\s*id: pinChangeProc\b(.*?)\n\s*\}\n\n", SOURCE, re.S
+        )
+        self.assertIsNotNone(process)
+        body = process.group(1)
+        queue = function("queuePinChange")
+        start = function("nextPinChange")
+        finish = function("finishPinChange")
+        self.assertIn("if (!pinChangeProc.busy) nextPinChange()", queue)
+        self.assertIn("pinChangeProc.operation = change.operation", start)
+        self.assertIn("pinChangeProc.value = change.value", start)
+        self.assertIn("pinChangeProc.path = change.path", start)
+        self.assertIn("pinChangeProc.busy = true", start)
+        self.assertIn("if (!pinChangeProc.exitSeen || !pinChangeProc.streamSeen) return", finish)
+        self.assertIn("pinChangeProc.busy = false", finish)
+        self.assertIn("nextPinChange()", finish)
+        self.assertIn("var operation = pinChangeProc.operation", body)
+        self.assertNotIn("pinChangeProc.change", body)
+        self.assertRegex(body, r"split\(/\\r\?\\n/,\s*1\)\[0\]\.trim\(\)")
+        self.assertRegex(
+            body,
+            r'var iconOperation = operation === "icon"\s*\|\|\s*operation === "unicon"',
+        )
+        self.assertIn(
+            "var error = iconOperation ? /^error:([A-Za-z0-9_-]+)$/.exec(result) : null",
+            body,
+        )
+        self.assertIn("pinChangeProc.streamSeen = true", body)
+        self.assertIn("pinChangeProc.exitSeen = true", body)
+        self.assertGreaterEqual(body.count("root.finishPinChange()"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

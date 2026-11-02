@@ -8,6 +8,13 @@ exec 2>/dev/null
 applications=$HOME/.local/share/applications
 private_applications=$applications/omarchy-taskbar
 icons=$HOME/.local/share/icons/hicolor/256x256/apps
+script_path=${BASH_SOURCE[0]}
+if [[ $script_path == */* ]]; then
+  script_dir=${script_path%/*}
+else
+  script_dir=.
+fi
+set_icon_script=$script_dir/set-icon.sh
 
 # DesktopEntries scans application subdirectories and maps their names into
 # the desktop-entry id, so this keeps omarchy-taskbar-<hash> stable.
@@ -150,10 +157,8 @@ add_pin() (
 )
 
 remove_pin() {
+  "$BASH" "$set_icon_script" remove "$1" >/dev/null || true
   [[ $1 =~ ^omarchy-taskbar-[0-9a-f]{16}$ ]] || return 0
-  if [[ -d $private_applications && ! -L $private_applications && -O $private_applications ]]; then
-    rm -f -- "$private_applications/${1#omarchy-taskbar-}.desktop" || return 0
-  fi
   rm -f -- "$applications/$1.desktop" "$icons/$1.png" || return 0
 }
 
@@ -185,4 +190,6 @@ case $1 in
   add) add_pin "$2" "$3" ;;
   remove) remove_pin "$2" ;;
   repair) repair_pin "$2" ;;
+  icon) "$BASH" "$set_icon_script" set "$2" "$3" ;;
+  unicon) "$BASH" "$set_icon_script" reset "$2" ;;
 esac

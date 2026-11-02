@@ -56,6 +56,10 @@ Click an app with several windows to choose a thumbnail and jump to its workspac
 - **Right click**: pin/unpin, new window, close. New window works for every
   app, also windows without a desktop entry (such as a terminal started with
   its own class).
+- **Custom icons for pinned apps**: right-click a pin and choose **Change
+  icon…** to select a PNG, SVG, ICO or EXE, or **Restore icon** to return to the
+  app's normal icon. Files are identified by their contents, not trusted by
+  extension. EXE icons are extracted as data; the EXE is never run.
 - **Application icons**: apps launched through a terminal or script can show
   their own icon.
 - **Web apps** (Omarchy's `omarchy-webapp-install`) show their own icon, get
@@ -71,6 +75,14 @@ Nothing to install and no administrator permissions needed. It only uses what
 Omarchy already ships: Quickshell's window list, desktop entries and icon theme,
 Omarchy's theme tokens, `omarchy bar transparent` and `uwsm-app` to start apps.
 It reacts to events (windows opening/closing, file changes) and never polls.
+
+Custom PNG icons need no converter. SVG conversion uses `rsvg-convert`, ICO
+conversion uses `icotool`, and EXE extraction uses both `wrestool` and
+`icotool` when those tools are available; the plugin never installs them. If a
+conditional tool is missing, times out or returns invalid output, the change is
+rejected and the current icon remains. Input is limited to 20 MB, the stored PNG
+must be at most 1024x1024, reads and conversions have a five-second timeout,
+and concurrent icon-map updates wait at most ten seconds.
 
 The first time it pins your default browser (`omarchy-cmd-default-browser`),
 file manager and terminal. A window whose class has no desktop entry (for
@@ -111,6 +123,11 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
 
 - `~/.config/omarchy-taskbar/pinned.json`: your pinned apps (desktop entry ids,
   in order). You can edit it by hand; the bar picks up changes at once.
+- `~/.config/omarchy-taskbar/pinned-icons.json`: maps pinned app keys to their
+  generated custom PNG filenames. It is updated atomically, watched by the bar
+  and restricted to your account (`0600`).
+- `~/.config/omarchy-taskbar/icons/`: generated custom PNG icons. The directory
+  is private (`0700`) and every icon is restricted to your account (`0600`).
 - `~/.config/omarchy-taskbar/config.json`: optional appearance settings, applied
   immediately. Right-click empty bar space to open **Style** or **Size**.
   **Default** inherits the top bar's theme and transparency. **Crystal** adds a
@@ -134,6 +151,11 @@ After an update, run `omarchy restart shell` so the shell loads the new code.
   launchers are moved into it when their pins are repaired at startup.
 - `~/.local/share/icons/hicolor/256x256/apps/omarchy-taskbar-<hash>.png`:
   extracted Windows icons, when available.
+- `bin/set-icon.sh`: validates selected icon content, performs time-limited
+  conversion or extraction, and atomically stores or restores private custom
+  icons.
+- `bin/pin-file.sh`: manages generated file pins and routes its `icon` and
+  `unicon` operations through `bin/set-icon.sh`.
 
 Unpinning removes the generated launcher and icon. After removing the plugin,
 clean up any remaining pins and generated files with:
@@ -156,6 +178,11 @@ python3 scripts/check_native_settings.py
 
 The QML and native settings checks use the existing Qt/Quickshell installation.
 The native settings check writes only to an isolated temporary directory.
+`tests/test_set_icon.py` covers content validation, converters, limits,
+timeouts, permissions and concurrent/atomic updates; `tests/test_custom_icons.py`
+covers loading, selecting and restoring custom icons in QML. Icon cleanup and
+safe `icon`/`unicon` dispatch are also covered in `tests/test_file_pins.py` and
+`tests/test_shell_commands.py`.
 See the [changelog](CHANGELOG.md) for release history.
 
 ## License

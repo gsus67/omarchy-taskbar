@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Dialogs
+import QtCore
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -27,11 +29,14 @@ Item {
   readonly property string pluginDirectory: decodeURIComponent(
     Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
   readonly property string pinsPath: configHome + "/omarchy-taskbar/pinned.json"
+  readonly property string iconsMapPath: configHome + "/omarchy-taskbar/pinned-icons.json"
+  readonly property string iconsDirectory: configHome + "/omarchy-taskbar/icons"
   readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))
   readonly property int iconSize: Math.round(barSize * 0.66)
   readonly property color foreground: Commons.Color.bar.text
 
   property var pinned: []
+  property var customIcons: ({})
   property bool transparent: false
   property var configuredWidth: null
   property real configuredScale: 1
@@ -249,6 +254,33 @@ Item {
     }
   }
 
+  FileView {
+    id: iconsFile
+    path: root.iconsMapPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text())
+        var icons = Object.create(null)
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          Object.keys(parsed).forEach(function(key) {
+            var value = parsed[key]
+            if (typeof value !== "string" || !/^[0-9a-f]{16}-[A-Za-z0-9]{6}\.png$/.test(value)) return
+            var path = root.iconsDirectory + "/" + value
+            if (path.indexOf(root.iconsDirectory + "/") !== 0) return
+            icons[key] = path
+          })
+        }
+        root.customIcons = icons
+      } catch (e) {
+        root.customIcons = ({})
+      }
+    }
+    onLoadFailed: root.customIcons = ({})
+  }
+
   // First run: pin the default browser (the real one behind Omarchy's
   // launcher), file manager and terminal.
   Process {
@@ -304,16 +336,29 @@ Item {
   // race a drop that is still creating its desktop entry.
   property var pinChanges: []
 
-  function queuePinChange(operation, value) {
-    root.pinChanges = root.pinChanges.concat([{ operation: operation, value: value }])
-    if (!pinChangeProc.running) nextPinChange()
+  function queuePinChange(operation, value, path) {
+    root.pinChanges = root.pinChanges.concat([{ operation: operation, value: value, path: path || "" }])
+    if (!pinChangeProc.busy) nextPinChange()
   }
 
   function nextPinChange() {
     if (root.pinChanges.length === 0) return
-    pinChangeProc.change = root.pinChanges[0]
+    var change = root.pinChanges[0]
     root.pinChanges = root.pinChanges.slice(1)
+    pinChangeProc.operation = change.operation
+    pinChangeProc.value = change.value
+    pinChangeProc.path = change.path
+    pinChangeProc.applicationIds = JSON.stringify(DesktopEntries.applications.values.map(function(entry) { return String(entry.id) }))
+    pinChangeProc.exitSeen = false
+    pinChangeProc.streamSeen = false
+    pinChangeProc.busy = true
     pinChangeProc.running = true
+  }
+
+  function finishPinChange() {
+    if (!pinChangeProc.exitSeen || !pinChangeProc.streamSeen) return
+    pinChangeProc.busy = false
+    nextPinChange()
   }
 
   function droppedPath(url) {
@@ -321,23 +366,78 @@ Item {
     if (!match) return ""
     try {
       var path = decodeURIComponent(match[1])
-      return /[\x00-\x1f\x7f-\x9f]/.test(path) ? "" : path
+      return path !== "/" && !/[\x00-\x1f\x7f-\x9f]/.test(path) ? path : ""
     } catch (e) { return "" }
+  }
+
+  FileDialog {
+    id: iconFileDialog
+    property string appKey: ""
+    title: root.t("Choose an icon", "Elegir un icono")
+    fileMode: FileDialog.OpenFile
+    currentFolder: StandardPaths.writableLocation(StandardPaths.PicturesLocation)
+    nameFilters: ["Icon files (*.png *.PNG *.svg *.SVG *.ico *.ICO *.exe *.EXE)"]
+    onAccepted: {
+      var path = root.droppedPath(selectedFile)
+      if (path !== "") root.queuePinChange("icon", appKey, path)
+    }
+  }
+
+  function iconErrorMessage(code) {
+    switch (code) {
+    case "key": return root.t("This app cannot have a custom icon.", "Esta aplicación no admite un icono personalizado.")
+    case "source": return root.t("The selected icon cannot be read.", "No se puede leer el icono seleccionado.")
+    case "size": return root.t("The selected icon is too large.", "El icono seleccionado es demasiado grande.")
+    case "type": return root.t("The selected file is not a supported icon.", "El archivo seleccionado no es un icono compatible.")
+    case "dimensions": return root.t("The selected icon dimensions are too large.", "Las dimensiones del icono seleccionado son demasiado grandes.")
+    case "extract": return root.t("The icon could not be extracted.", "No se pudo extraer el icono.")
+    case "svg": return root.t("The selected SVG is not safe to use.", "El SVG seleccionado no es seguro.")
+    case "busy": return root.t("Another icon change is still in progress.", "Todavía hay otro cambio de icono en curso.")
+    case "tool": return root.t("A required icon tool is unavailable.", "No está disponible una herramienta necesaria para el icono.")
+    case "storage": return root.t("The icon storage directory is unavailable.", "El directorio de iconos no está disponible.")
+    case "map": return root.t("The custom icon map could not be updated.", "No se pudo actualizar el mapa de iconos personalizados.")
+    case "temp": return root.t("A temporary icon file could not be prepared.", "No se pudo preparar un archivo temporal para el icono.")
+    case "usage": return root.t("The icon change request was invalid.", "La solicitud de cambio de icono no era válida.")
+    default: return root.t("The custom icon could not be changed.", "No se pudo cambiar el icono personalizado.")
+    }
+  }
+
+  function notifyIconError(code) {
+    Quickshell.execDetached(["notify-send", root.t("Icon change failed", "Error al cambiar el icono"),
+      root.iconErrorMessage(code)])
   }
 
   Process {
     id: pinChangeProc
-    property var change: ({ operation: "", value: "" })
-    command: ["bash", root.pluginDirectory + "/bin/pin-file.sh", change.operation, change.value,
-      JSON.stringify(DesktopEntries.applications.values.map(function(entry) { return String(entry.id) }))]
+    property string operation: ""
+    property string value: ""
+    property string path: ""
+    property string applicationIds: "[]"
+    property bool exitSeen: false
+    property bool streamSeen: false
+    property bool busy: false
+    command: ["bash", "-c",
+      'case "$1" in icon) "$BASH" "$5" "$1" "$2" "$4" ;; unicon) "$BASH" "$5" "$1" "$2" "" ;; *) "$BASH" "$5" "$1" "$2" "$3" ;; esac',
+      "omarchy-taskbar", operation, value, applicationIds, path,
+      root.pluginDirectory + "/bin/pin-file.sh"]
     stdout: StdioCollector {
       onStreamFinished: {
-        var id = text.replace(/\n$/, "")
-        if (pinChangeProc.change.operation === "add" && id !== "" && !/[\x00-\x1f\x7f-\x9f]/.test(id)
-            && !root.isPinned(id)) root.savePins(root.pinned.concat([id]))
+        var operation = pinChangeProc.operation
+        var result = text.split(/\r?\n/, 1)[0].trim()
+        var iconOperation = operation === "icon" || operation === "unicon"
+        var error = iconOperation ? /^error:([A-Za-z0-9_-]+)$/.exec(result) : null
+        if (error) root.notifyIconError(error[1])
+        else if (operation === "add" && result !== "" && !/[\x00-\x1f\x7f-\x9f]/.test(result)
+            && !root.isPinned(result)) root.savePins(root.pinned.concat([result]))
+        else if (iconOperation && result === "ok") iconsFile.reload()
+        pinChangeProc.streamSeen = true
+        root.finishPinChange()
       }
     }
-    onExited: root.nextPinChange()
+    onExited: {
+      pinChangeProc.exitSeen = true
+      root.finishPinChange()
+    }
   }
 
   // ------------------------------------------------------------ apps model
@@ -652,6 +752,8 @@ Item {
   }
 
   function iconFor(app) {
+    var custom = root.customIcons[app.key]
+    if (typeof custom === "string" && custom !== "") return Util.fileUrl(custom)
     var found = root.fallbacks[app.lookup]
     // A pinned program path: its file name ("/usr/bin/foot" → "foot").
     var own = app.appId !== "" ? app.appId.toLowerCase() : String(app.exe || "").split("/").pop()
@@ -1643,6 +1745,16 @@ Item {
             text: root.isPinned(button.app.key) ? root.t("Unpin", "Desanclar") : root.t("Pin", "Anclar")
             shown: root.canPin(button.app) || root.isPinned(button.app.key)
             onTriggered: { root.closeMenu(); root.togglePin(button.app.key) }
+          }
+          MenuRow {
+            text: root.t("Change icon…", "Cambiar icono…")
+            shown: root.isPinned(button.app.key)
+            onTriggered: { iconFileDialog.appKey = button.app.key; iconFileDialog.open(); root.closeMenu() }
+          }
+          MenuRow {
+            text: root.t("Restore icon", "Restaurar icono")
+            shown: typeof root.customIcons[button.app.key] === "string"
+            onTriggered: { root.queuePinChange("unicon", button.app.key, ""); root.closeMenu() }
           }
           MenuRow {
             text: root.t("New window", "Nueva ventana")

@@ -27,11 +27,14 @@ Item {
   readonly property string pluginDirectory: decodeURIComponent(
     Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
   readonly property string pinsPath: configHome + "/omarchy-taskbar/pinned.json"
+  readonly property string iconsMapPath: configHome + "/omarchy-taskbar/pinned-icons.json"
+  readonly property string iconsDirectory: configHome + "/omarchy-taskbar/icons"
   readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))
   readonly property int iconSize: Math.round(barSize * 0.66)
   readonly property color foreground: Commons.Color.bar.text
 
   property var pinned: []
+  property var customIcons: ({})
   property bool transparent: false
   property var configuredWidth: null
   property real configuredScale: 1
@@ -247,6 +250,33 @@ Item {
     onLoadFailed: function(error) {
       if (error === FileViewError.FileNotFound) seedProc.running = true
     }
+  }
+
+  FileView {
+    id: iconsFile
+    path: root.iconsMapPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text())
+        var icons = Object.create(null)
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          Object.keys(parsed).forEach(function(key) {
+            var value = parsed[key]
+            if (typeof value !== "string" || !/^[0-9a-f]{16}-[A-Za-z0-9]{6}\.png$/.test(value)) return
+            var path = root.iconsDirectory + "/" + value
+            if (path.indexOf(root.iconsDirectory + "/") !== 0) return
+            icons[key] = path
+          })
+        }
+        root.customIcons = icons
+      } catch (e) {
+        root.customIcons = ({})
+      }
+    }
+    onLoadFailed: root.customIcons = ({})
   }
 
   // First run: pin the default browser (the real one behind Omarchy's
@@ -652,6 +682,8 @@ Item {
   }
 
   function iconFor(app) {
+    var custom = root.customIcons[app.key]
+    if (typeof custom === "string" && custom !== "") return Util.fileUrl(custom)
     var found = root.fallbacks[app.lookup]
     // A pinned program path: its file name ("/usr/bin/foot" → "foot").
     var own = app.appId !== "" ? app.appId.toLowerCase() : String(app.exe || "").split("/").pop()

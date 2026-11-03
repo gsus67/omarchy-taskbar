@@ -1,5 +1,6 @@
 """Static guards for app dragging; the layer windows need a Wayland session."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -52,6 +53,9 @@ class ReorderTest(unittest.TestCase):
             self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             first_inode = path.stat().st_ino
+            # A hard link keeps the first inode allocated, so the filesystem
+            # cannot hand the same number to a later replacement file.
+            os.link(path, Path(directory) / "first-inode")
 
             payloads = [json.dumps([f"app-{index}", "toString"]) for index in range(8)]
             processes = [subprocess.Popen(  # noqa: S603 - fixed script with test-owned data

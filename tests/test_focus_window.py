@@ -66,10 +66,10 @@ console.log(JSON.stringify(specialWorkspaceForMonitor(monitors, process.argv[2])
             qml_function("dispatchFocus"),
             qml_function("startNextFocus"),
             qml_function("finishFocus"),
+            qml_function("completeFocusQuery"),
+            qml_function("timeoutFocusQuery"),
             qml_function("focusWindow"),
         ]
-        if queued_requests is not None or failed_starts:
-            functions.append(qml_function("completeFocusQuery"))
         if through_activate:
             functions.insert(0, qml_function("activate"))
         code = "\n".join(functions) + r'''
@@ -99,34 +99,56 @@ const Hyprland = {
   dispatch: request => calls.push(["dispatch", request]),
 };
 let queryStartCount = 0;
-const focusMonitorQuery = {
-  _running: false,
-  hasExited: false,
-  streamFinished: false,
-  querySucceeded: false,
-  output: "",
-  get running() { return this._running; },
-  set running(value) {
-    if (!value) {
-      this._running = false;
-      return;
-    }
-    queryStartCount += 1;
-    if (fixture.failedStarts > 0) {
-      fixture.failedStarts -= 1;
-      this._running = false;
-      completeFocusQuery();
-      return;
-    }
-    this._running = true;
+const focusQueryTimeout = {
+  requestId: 0,
+  running: false,
+  restart() { this.running = true; },
+  stop() { this.running = false; },
+};
+function makeQuery(requestId) {
+  const query = {
+    requestId: requestId || 0,
+    hasExited: false, streamFinished: false, querySucceeded: false,
+    output: "", _running: false, destroyed: false,
+    destroy() { this.destroyed = true; this._running = false; },
+    emitComplete() { root.completeFocusQuery(this.requestId, this); },
+  };
+  Object.defineProperty(query, "running", {
+    get() { return query._running; },
+    set(value) {
+      if (!value) { query._running = false; return; }
+      queryStartCount += 1;
+      if (fixture.failedStarts > 0) {
+        fixture.failedStarts -= 1;
+        query._running = false;
+        query.emitComplete();
+        return;
+      }
+      query._running = true;
+    },
+  });
+  return query;
+}
+const focusMonitorQuery = makeQuery(0);
+const createdQueries = [];
+const focusMonitorQueryComponent = {
+  createObject(parent, props) {
+    const query = makeQuery(props && props.requestId);
+    createdQueries.push(query);
+    return query;
   },
 };
+function currentQuery() { return root.activeFocusQuery || focusMonitorQuery; }
 const root = {
   focusRequests: [],
   activeFocusRequest: null,
+  activeFocusQuery: null,
+  focusRequestSeq: 0,
+  activeFocusRequestId: 0,
   startNextFocus,
   finishFocus,
   completeFocusQuery: typeof completeFocusQuery === "undefined" ? null : completeFocusQuery,
+  timeoutFocusQuery: typeof timeoutFocusQuery === "undefined" ? null : timeoutFocusQuery,
   dispatchFocus,
   specialWorkspaceForMonitor,
 };
@@ -142,25 +164,21 @@ let cycles = 0;
 while ((root.activeFocusRequest !== null || root.focusRequests.length > 0)
        && cycles < 20) {
   cycles += 1;
-  if (!focusMonitorQuery.running) {
-    if (root.completeFocusQuery) root.completeFocusQuery();
+  const query = currentQuery();
+  if (!query.running) {
+    query.emitComplete();
     continue;
   }
-  if (root.completeFocusQuery) {
-    // Exercise the risky ordering: Process stops before the collector exposes
-    // its final text. The active request must wait for streamFinished.
-    focusMonitorQuery.hasExited = true;
-    focusMonitorQuery.querySucceeded = fixture.querySucceeded;
-    root.completeFocusQuery();
-    focusMonitorQuery._running = false;
-    root.completeFocusQuery();
-    focusMonitorQuery.output = fixture.queryOutput;
-    focusMonitorQuery.streamFinished = true;
-    root.completeFocusQuery();
-  } else {
-    focusMonitorQuery.running = false;
-    finishFocus(fixture.queryOutput, fixture.querySucceeded);
-  }
+  // Exercise the risky ordering: Process stops before the collector exposes
+  // its final text. The active request must wait for streamFinished.
+  query.hasExited = true;
+  query.querySucceeded = fixture.querySucceeded;
+  query.emitComplete();
+  query._running = false;
+  query.emitComplete();
+  query.output = fixture.queryOutput;
+  query.streamFinished = true;
+  query.emitComplete();
 }
 console.log(JSON.stringify({
   calls,
@@ -194,6 +212,121 @@ console.log(JSON.stringify({
         )
         return json.loads(result.stdout)
 
+    def run_focus_events(self, scenario, monitors):
+        functions = [
+            qml_function("hyprlandOf"),
+            qml_function("specialWorkspaceForMonitor"),
+            qml_function("dispatchFocus"),
+            qml_function("startNextFocus"),
+            qml_function("finishFocus"),
+            qml_function("completeFocusQuery"),
+            qml_function("timeoutFocusQuery"),
+            qml_function("focusWindow"),
+        ]
+        code = "\n".join(functions) + r'''
+const fixture = JSON.parse(process.argv[1]);
+const calls = [];
+const snapshots = {};
+const targets = [0, 1].map(() => ({
+  activated: false,
+  activate: () => calls.push(["direct-activate"]),
+}));
+const hyprs = [
+  {wayland: targets[0], address: "aaa111", workspace: {name: "2"}, monitor: {name: "DP-1"}},
+  {wayland: targets[1], address: "bbb222", workspace: {name: "3"}, monitor: {name: "DP-1"}},
+];
+const Hyprland = {
+  toplevels: {values: hyprs},
+  dispatch: request => calls.push(["dispatch", request]),
+};
+const focusQueryTimeout = {
+  requestId: 0, running: false,
+  restart() { this.running = true; },
+  stop() { this.running = false; },
+};
+function makeQuery(requestId) {
+  const query = {
+    requestId: requestId || 0,
+    hasExited: false, streamFinished: false, querySucceeded: false,
+    output: "", _running: false, destroyed: false,
+    destroy() { this.destroyed = true; this._running = false; },
+    // Simulates the QML handlers of this process instance: they close over
+    // this instance and its captured requestId, never a caller-supplied id.
+    emitComplete() { root.completeFocusQuery(this.requestId, this); },
+    emitLate(output) {
+      this.hasExited = true; this.streamFinished = true;
+      this.querySucceeded = true; this.output = output;
+      this._running = false; this.emitComplete();
+    },
+    deliver(output) { this.emitLate(output); },
+  };
+  Object.defineProperty(query, "running", {
+    get() { return query._running; },
+    set(value) { query._running = !!value; },
+  });
+  return query;
+}
+const focusMonitorQuery = makeQuery(0);
+const createdQueries = [];
+const focusMonitorQueryComponent = {
+  createObject(parent, props) {
+    const query = makeQuery(props && props.requestId);
+    createdQueries.push(query);
+    return query;
+  },
+};
+const root = {
+  focusRequests: [], activeFocusRequest: null, activeFocusQuery: null,
+  focusRequestSeq: 0, activeFocusRequestId: 0,
+  startNextFocus, finishFocus, completeFocusQuery, timeoutFocusQuery,
+  dispatchFocus, specialWorkspaceForMonitor,
+};
+function currentQuery() { return root.activeFocusQuery || focusMonitorQuery; }
+function deliverCurrent() { currentQuery().deliver(fixture.queryOutput); }
+focusWindow(targets[0]);
+if (fixture.scenario === "early") {
+  // runningChanged(false) arrives before exited/streamFinished.
+  const query = currentQuery();
+  query._running = false;
+  query.emitComplete();
+  snapshots.afterEarly = calls.slice();
+  deliverCurrent();
+  snapshots.afterDeliver = calls.slice();
+} else {
+  focusWindow(targets[1]);
+  if (fixture.scenario === "late") {
+    const oldQuery = currentQuery();
+    deliverCurrent();
+    snapshots.afterFirst = calls.slice();
+    // Late events from the old process: invoke its own handlers only.
+    oldQuery.emitLate(fixture.queryOutput);
+    snapshots.afterLate = calls.slice();
+    deliverCurrent();
+    snapshots.afterDeliver = calls.slice();
+  } else if (fixture.scenario === "hung") {
+    const oldQuery = currentQuery();
+    snapshots.beforeTimeout = calls.slice();
+    root.timeoutFocusQuery();
+    snapshots.afterTimeout = calls.slice();
+    // Late events from the killed old process must not complete the new one.
+    oldQuery.emitLate(fixture.queryOutput);
+    snapshots.afterLate = calls.slice();
+    deliverCurrent();
+    snapshots.afterDeliver = calls.slice();
+  }
+}
+console.log(JSON.stringify({
+  snapshots, pending: root.focusRequests.length,
+  active: root.activeFocusRequest !== null,
+}));
+'''
+        fixture = {"scenario": scenario, "queryOutput": json.dumps(monitors)}
+        result = subprocess.run(  # noqa: S603 -- fixed local Node binary, no shell
+            [shutil.which("node"), "-e", code, json.dumps(fixture)],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        return json.loads(result.stdout)
+
     def test_live_closed_state_does_not_reopen_stale_cached_special(self):
         monitors = [{
             "name": "DP-1",
@@ -212,15 +345,21 @@ console.log(JSON.stringify({
         self.assertTrue(result["queryStarted"])
 
     def test_monitor_state_query_uses_direct_hyprctl_process(self):
-        process = qml_object("Process", "focusMonitorQuery")
+        process = qml_object("Process", "focusQueryProcess")
+        self.assertIn("focusMonitorQueryComponent", SOURCE)
         self.assertIn('command: ["hyprctl", "monitors", "-j"]', process)
         self.assertNotIn('"bash"', process)
 
     def test_monitor_query_completion_is_wired_to_stream_and_start_failure(self):
-        process = qml_object("Process", "focusMonitorQuery")
+        process = qml_object("Process", "focusQueryProcess")
         self.assertIn("onStreamFinished:", process)
-        self.assertIn("focusMonitorQuery.output = text", process)
-        self.assertIn("onRunningChanged: root.completeFocusQuery()", process)
+        self.assertIn("focusQueryProcess.output = text", process)
+        self.assertIn(
+            "onRunningChanged: root.completeFocusQuery("
+            "focusQueryProcess.requestId, focusQueryProcess)",
+            process,
+        )
+        self.assertNotIn("focusMonitorQuery.requestId", process)
         self.assertNotIn("focusMonitorOutput.text", process)
 
     def test_special_workspace_comes_from_target_windows_monitor(self):
@@ -256,6 +395,7 @@ console.log(JSON.stringify({
         ]
         result = self.run_live_focus(monitors, "2", target_monitor="HDMI-A-1")
         self.assertEqual(result["calls"], [
+            ["dispatch", 'hl.dsp.focus({ monitor = "HDMI-A-1" })'],
             ["dispatch", 'hl.dsp.workspace.toggle_special("right")'],
             ["dispatch", 'hl.dsp.focus({ window = "address:0xabc123" })'],
         ])
@@ -424,6 +564,56 @@ console.log(JSON.stringify({
         self.assertEqual(result["queryStartCount"], 2)
         self.assertEqual(result["pending"], 0)
         self.assertFalse(result["active"])
+
+    def test_running_changed_before_exited_waits_for_query_data(self):
+        monitors = [{"name": "DP-1", "focused": True,
+                     "specialWorkspace": {"id": -99, "name": "special:scratchpad"}}]
+        result = self.run_focus_events("early", monitors)
+        self.assertEqual(result["snapshots"]["afterEarly"], [])
+        self.assertEqual(result["snapshots"]["afterDeliver"], [
+            ["dispatch", 'hl.dsp.workspace.toggle_special("scratchpad")'],
+            ["dispatch", 'hl.dsp.focus({ window = "address:0xaaa111" })'],
+        ])
+        self.assertFalse(result["active"])
+
+    def test_late_events_from_previous_request_are_ignored(self):
+        monitors = [{"name": "DP-1", "focused": True,
+                     "specialWorkspace": {"id": -99, "name": "special:scratchpad"}}]
+        result = self.run_focus_events("late", monitors)
+        first = [
+            ["dispatch", 'hl.dsp.workspace.toggle_special("scratchpad")'],
+            ["dispatch", 'hl.dsp.focus({ window = "address:0xaaa111" })'],
+        ]
+        self.assertEqual(result["snapshots"]["afterFirst"], first)
+        self.assertEqual(result["snapshots"]["afterLate"], first)
+        self.assertEqual(result["snapshots"]["afterDeliver"], first + [
+            ["dispatch", 'hl.dsp.workspace.toggle_special("scratchpad")'],
+            ["dispatch", 'hl.dsp.focus({ window = "address:0xbbb222" })'],
+        ])
+        self.assertEqual(result["pending"], 0)
+        self.assertFalse(result["active"])
+
+    def test_hung_hyprctl_times_out_and_focuses_without_toggling(self):
+        monitors = [{"name": "DP-1", "focused": True,
+                     "specialWorkspace": {"id": -99, "name": "special:scratchpad"}}]
+        result = self.run_focus_events("hung", monitors)
+        self.assertEqual(result["snapshots"]["beforeTimeout"], [])
+        timed_out = [["dispatch", 'hl.dsp.focus({ window = "address:0xaaa111" })']]
+        self.assertEqual(result["snapshots"]["afterTimeout"], timed_out)
+        self.assertEqual(result["snapshots"]["afterLate"], timed_out)
+        self.assertEqual(result["snapshots"]["afterDeliver"], timed_out + [
+            ["dispatch", 'hl.dsp.workspace.toggle_special("scratchpad")'],
+            ["dispatch", 'hl.dsp.focus({ window = "address:0xbbb222" })'],
+        ])
+        self.assertEqual(result["pending"], 0)
+        self.assertFalse(result["active"])
+
+    def test_focus_query_has_a_timeout_timer(self):
+        timer = qml_object("Timer", "focusQueryTimeout")
+        self.assertIn("interval: 2000", timer)
+        self.assertIn("onTriggered: root.timeoutFocusQuery(", timer)
+        process = qml_object("Process", "focusQueryProcess")
+        self.assertIn("property int requestId: 0", process)
 
     def test_special_workspace_name_cannot_inject_a_dispatch(self):
         result = self.run_live_focus(

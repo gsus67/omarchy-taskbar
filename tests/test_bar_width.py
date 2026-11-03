@@ -89,6 +89,7 @@ saveConfig("width","10%");
 saveConfig("scale",0.75);
 saveConfig("style",null);
 saveConfig("__proto__",{});
+saveConfig("width","auto");
 saveConfig("width","$(touch injected)");
 const writes=[];
 while(configWriter.running) {
@@ -100,8 +101,8 @@ console.log(JSON.stringify(writes));
 '''
         result = subprocess.run(["node", "-e", code], text=True, capture_output=True, timeout=5, check=True)
         writes = json.loads(result.stdout)
-        self.assertEqual(len(writes), 4)
-        self.assertEqual(writes[-1], {"other":"preserved", "width":"10%", "scale":0.75})
+        self.assertEqual(len(writes), 5)
+        self.assertEqual(writes[-1], {"other":"preserved", "width":"auto", "scale":0.75})
         self.assertEqual(writes[1], {"other":"preserved", "style":"crystal", "width":"10%"})
 
     def test_empty_space_menu_dismissal_and_keyboard(self):
@@ -170,9 +171,13 @@ console.log(JSON.stringify(writes));
         self.assertEqual([row["value"] for row in scales[1:]], [0.75, 0.9, None, 1.25, 1.5, 2])
         self.assertEqual(scales[1]["label"], "0,75x")
         lengths = self.evaluate('barMenuItems("length")', width="20%")
-        self.assertEqual([row["value"] for row in lengths[1:]], [None, "90%", "80%", "70%", "60%", "50%", "40%", "30%", "20%", "10%"])
-        self.assertTrue(lengths[-2]["checked"])
-        self.assertTrue(self.evaluate('barMenuItems("length")', width="10%")[-1]["checked"])
+        self.assertEqual([row["value"] for row in lengths[1:]], [None, "90%", "80%", "70%", "60%", "50%", "40%", "30%", "20%", "10%", "auto"])
+        self.assertTrue(lengths[-3]["checked"])
+        self.assertTrue(self.evaluate('barMenuItems("length")', width="10%")[-2]["checked"])
+        auto = self.evaluate('barMenuItems("length")', width="auto")
+        self.assertEqual(auto[-1]["label"], "Auto")
+        self.assertEqual([row["checked"] for row in auto[1:]].count(True), 1)
+        self.assertTrue(auto[-1]["checked"])
 
     def test_scale_multiplies_bar_height_and_icons(self):
         self.assertIn("readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))", SOURCE)
@@ -198,8 +203,12 @@ console.log(JSON.stringify(writes));
             'widthFor(-100, 1000, 40, false, 0), '
             'widthFor("20%", 50, 40, true, 100), '
             'widthFor("10%", 1000, 40, false, 50), '
-            'widthFor("10%", 1000, 40, false, 400)]')
-        self.assertEqual(result, [1000, 200, 450, 200, 1000, 968, 450, 968, 1000, 80, 18, 100, 400])
+            'widthFor("10%", 1000, 40, false, 400), '
+            'widthFor("auto", 1000, 40, false, 300), '
+            'widthFor("auto", 1000, 40, false, 20), '
+            'widthFor("auto", 1000, 40, false, 5000), '
+            'widthFor("auto", 1000, 40, true, 5000)]')
+        self.assertEqual(result, [1000, 200, 450, 200, 1000, 968, 450, 968, 1000, 80, 18, 100, 400, 300, 80, 1000, 968])
         self.assertIn("appRow.implicitWidth", SOURCE)
         self.assertIn("modelData.height - barWindow.height - barWindow.margins.bottom", SOURCE)
         self.assertIn("appViewport.contentX", SOURCE)

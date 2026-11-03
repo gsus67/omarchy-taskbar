@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.gsus67.omarchy-taskbar",
   "name": "Omarchy Taskbar",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "author": "Omarchy Taskbar contributors",
   "license": "MIT",
   "description": "A native taskbar with pinned and running apps, Default and Crystal styles, any screen edge or combined with the Omarchy bar, adjustable size, and private imported launchers.",

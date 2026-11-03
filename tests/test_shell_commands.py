@@ -30,11 +30,67 @@ class ShellCommandTest(unittest.TestCase):
         for source in [SOURCE] + [path.read_text() for path in (ROOT / "bin").glob("*.sh")]:
             self.assertNotRegex(source, r"\b(?:s[u](?:do)?|pkex[e]c|do[a]s)\b")
 
-    def test_bash_only_runs_literal_scripts_or_the_pin_script_with_positional_data(self):
+    def test_bash_only_runs_literal_scripts_with_positional_data(self):
         for call in re.finditer(r'"bash",\s*', SOURCE):
             rest = SOURCE[call.end():]
-            self.assertRegex(rest, r'^(?:"-c",|root\.pluginDirectory \+ "/bin/pin-file\.sh",\s*'
-                             r'change\.operation,\s*change\.value,\s*JSON\.stringify\()')
+            self.assertRegex(rest, r'^"-c",')
+
+    def test_pin_icon_path_is_positional_data(self):
+        self.assertRegex(SOURCE, r"function queuePinChange\(operation, value, path\)")
+        command = re.search(
+            r"id: pinChangeProc\b.*?command:\s*\[(.*?)\]\s*stdout:", SOURCE, re.S
+        )
+        self.assertIsNotNone(command)
+        self.assertIn('case "$1" in icon)', command.group(1))
+        self.assertIn('timeout -k 2 30 "$BASH" "$5" "$1" "$2" "$4"', command.group(1))
+        self.assertIn('unicon) timeout -k 2 30 "$BASH" "$5" "$1" "$2" ""', command.group(1))
+        self.assertIn('*) timeout -k 2 30 "$BASH" "$5" "$1" "$2" "$3"', command.group(1))
+        arguments = command.group(1).split('"omarchy-taskbar",', 1)[1]
+        self.assertRegex(
+            arguments,
+            r'^\s*operation,\s*value,\s*applicationIds,\s*path,\s*'
+            r'root\.pluginDirectory \+ "/bin/pin-file\.sh"\s*$',
+        )
+        self.assertNotRegex(
+            command.group(1),
+            r'(?:["\'][^"\']*["\']\s*\+\s*(?:operation|value|applicationIds|path)\b|'
+            r'(?:operation|value|applicationIds|path)\s*\+\s*["\'])',
+        )
+
+    def test_pin_queue_process_has_a_hard_kill_timeout(self):
+        command = re.search(
+            r"id: pinChangeProc\b.*?command:\s*\[(.*?)\]\s*stdout:", SOURCE, re.S
+        )
+        self.assertIsNotNone(command)
+        self.assertIn('timeout -k 2 30 "$BASH" "$5"', command.group(1))
+
+    def test_icon_errors_notify_with_an_argument_list_and_fixed_messages(self):
+        notification = re.search(
+            r'Quickshell\.execDetached\(\["notify-send",(.*?)\]\)', SOURCE, re.S
+        )
+        self.assertIsNotNone(notification)
+        arguments = re.sub(r"\s+", " ", notification.group(1)).strip()
+        self.assertEqual(
+            arguments,
+            'root.t("Icon change failed", "Error al cambiar el icono"), '
+            "root.iconErrorMessage(code)",
+        )
+        self.assertRegex(SOURCE, r'default:\s*return root\.t\(')
+
+    def test_icon_error_messages_cover_every_set_icon_failure_code(self):
+        set_icon = (ROOT / "bin/set-icon.sh").read_text()
+        failure_codes = set(
+            re.findall(r"^\s*fail\s+([A-Za-z0-9_-]+)\s*$", set_icon, re.M)
+        )
+        message_function = re.search(
+            r"function iconErrorMessage\([^\n]*\)\s*\{(.*?)\n\s*\}", SOURCE, re.S
+        )
+        self.assertTrue(failure_codes, "set-icon.sh has no literal fail codes")
+        self.assertIsNotNone(message_function)
+        message_codes = set(
+            re.findall(r'case "([A-Za-z0-9_-]+)":', message_function.group(1))
+        )
+        self.assertEqual(set(), failure_codes - message_codes)
 
     def test_no_other_shells(self):
         for shell in ('"sh"', '"/bin/sh"', '"zsh"', '"eval"'):

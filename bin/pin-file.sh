@@ -3,17 +3,26 @@
 # Add a dropped file or remove a generated entry. Only a successful add prints
 # an id; unsupported files and failed file operations stay silent.
 set -euo pipefail
+umask 077
 exec 2>/dev/null
 
 applications=$HOME/.local/share/applications
 private_applications=$applications/omarchy-taskbar
 icons=$HOME/.local/share/icons/hicolor/256x256/apps
+script_path=${BASH_SOURCE[0]}
+if [[ $script_path == */* ]]; then
+  script_dir=${script_path%/*}
+else
+  script_dir=.
+fi
+set_icon_script=$script_dir/set-icon.sh
 
 # DesktopEntries scans application subdirectories and maps their names into
 # the desktop-entry id, so this keeps omarchy-taskbar-<hash> stable.
 secure_applications_dir() {
   [[ ! -L $private_applications ]] || return 1
-  mkdir -p -- "$private_applications" || return 1
+  # shellcheck disable=SC2174  # chmod below also fixes an existing directory.
+  mkdir -p -m 700 -- "$private_applications" || return 1
   [[ -d $private_applications && ! -L $private_applications && -O $private_applications ]] || return 1
   chmod 700 -- "$private_applications"
 }
@@ -78,25 +87,37 @@ known_desktop_id() {
   return 1
 }
 
-# Optional extraction runs in a subshell so its temporary directory is always
-# removed. Missing tools or a failed extraction leave the generic icon in use.
+# Optional extraction delegates all untrusted parsing and resource limits to
+# set-icon.sh, then atomically copies only its validated private PNG.
 extract_icon() (
-  local path=$1 id=$2 tmp ico png
-  command -v wrestool >/dev/null && command -v icotool >/dev/null || return 0
-  tmp=$(mktemp -d) || return 0
-  trap 'rm -rf -- "$tmp"' EXIT
-  wrestool -x -t 14 -o "$tmp" -- "$path" || true
-  for ico in "$tmp"/*.ico; do
-    [[ -f $ico ]] || continue
-    icotool -x -o "$tmp" -- "$ico" || true
-  done
-  for png in "$tmp"/*256x256*.png "$tmp"/*.png; do
-    [[ -f $png ]] || continue
-    if mkdir -p -- "$icons" && cp -- "$png" "$icons/$id.png"; then
-      printf '%s' "$id"
-    fi
-    break
-  done
+  local path=$1 id=$2 result name source destination="" validation_dir=""
+  local temp_parent=${TMPDIR:-/tmp} temp_prefix validation_state validation_map validation_icons
+  [[ $temp_parent == /* ]] || return 0
+  temp_prefix=${temp_parent%/}/omarchy-taskbar-pin.
+  validation_dir=$(mktemp -d "${temp_prefix}XXXXXX") || return 0
+  [[ $validation_dir == "$temp_prefix"?????? && -d $validation_dir \
+    && ! -L $validation_dir && -O $validation_dir ]] || return 0
+  trap '[[ -z $destination ]] || rm -f -- "$destination"; [[ -z $validation_dir ]] || rm -rf -- "$validation_dir"' EXIT
+  validation_state=$validation_dir/config/omarchy-taskbar
+  validation_map=$validation_state/pinned-icons.json
+  validation_icons=$validation_state/icons
+  result=$(XDG_CONFIG_HOME="$validation_dir/config" "$BASH" "$set_icon_script" set "$id" "$path") || return 0
+  [[ $result == ok && -f $validation_map && ! -L $validation_map && -O $validation_map ]] || return 0
+  name=$(jq -er --arg key "$id" '.[$key] | select(type == "string")' -- "$validation_map") || return 0
+  [[ $name =~ ^[0-9a-f]{16}-[A-Za-z0-9]{6}\.png$ ]] || return 0
+  source=$validation_icons/$name
+  [[ -f $source && ! -L $source && -O $source ]] || return 0
+  [[ $icons == /* && ! -L $icons ]] || return 0
+  mkdir -p -- "$icons" || return 0
+  [[ -d $icons && ! -L $icons && -O $icons ]] || return 0
+  destination=$(mktemp "$icons/.${id}.XXXXXX") || return 0
+  [[ $destination == "$icons"/.${id}.?????? && -f $destination \
+    && ! -L $destination && -O $destination ]] || return 0
+  cp --no-dereference -- "$source" "$destination" || return 0
+  chmod 600 -- "$destination" || return 0
+  mv -fT -- "$destination" "$icons/$id.png" || return 0
+  destination=""
+  printf '%s' "$id"
 )
 
 write_launcher() {
@@ -150,10 +171,8 @@ add_pin() (
 )
 
 remove_pin() {
+  "$BASH" "$set_icon_script" remove "$1" >/dev/null || true
   [[ $1 =~ ^omarchy-taskbar-[0-9a-f]{16}$ ]] || return 0
-  if [[ -d $private_applications && ! -L $private_applications && -O $private_applications ]]; then
-    rm -f -- "$private_applications/${1#omarchy-taskbar-}.desktop" || return 0
-  fi
   rm -f -- "$applications/$1.desktop" "$icons/$1.png" || return 0
 }
 
@@ -185,4 +204,6 @@ case $1 in
   add) add_pin "$2" "$3" ;;
   remove) remove_pin "$2" ;;
   repair) repair_pin "$2" ;;
+  icon) "$BASH" "$set_icon_script" set "$2" "$3" ;;
+  unicon) "$BASH" "$set_icon_script" reset "$2" ;;
 esac

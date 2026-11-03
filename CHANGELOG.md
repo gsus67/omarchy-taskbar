@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased — v0.2.1
+## Unreleased
+
+### Appearance
+
+- Add **Change icon…** to the right-click menu of pinned apps for PNG, SVG, ICO
+  and EXE files, plus **Restore icon** whenever a custom icon is active.
+- Store custom icons as private PNG files and reload their map immediately so
+  every taskbar reflects changes without a restart.
+
+### Security
+
+- Identify selected icons by content, never execute EXE files, reject unsafe
+  SVG content, limit sources to 20 MB and stored PNG dimensions to 1024x1024,
+  and time-limit reads, conversions and extraction.
+- Keep `pinned-icons.json`, its lock and generated icons owner-only (`0600`) in
+  owner-only directories (`0700`), with serialized atomic map updates.
+- Add no mandatory dependency. PNG works directly; SVG uses `rsvg-convert`,
+  ICO uses `icotool`, and EXE extraction is available with `wrestool` and
+  `icotool`. Missing, timed-out or invalid converter output leaves the current
+  icon unchanged.
+
+### Fixes
 
 - Hide the active Hyprland special workspace before focusing a taskbar window
   outside it, while leaving the workspace open when its own window is chosen.

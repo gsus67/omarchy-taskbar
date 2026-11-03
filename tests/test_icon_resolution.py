@@ -65,7 +65,7 @@ class IconResolutionTest(unittest.TestCase):
         self.assertIn('root.pendingIconIndex[name] = value', parser)
         scan = block("Process", "iconIndexScan")
         self.assertIn('stdout: SplitParser { onRead: function(line) { root.indexIconLine(line) } }', scan)
-        self.assertIn('onStarted: root.pendingIconIndex = ({})', scan)
+        self.assertIn('onStarted: root.pendingIconIndex = root.newDictionary()', scan)
         self.assertIn('onExited: root.iconIndex = root.pendingIconIndex', scan)
         self.assertEqual(SOURCE.count('root.iconIndex ='), 1)
 

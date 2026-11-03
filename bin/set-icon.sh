@@ -12,6 +12,7 @@ icons_dir=$state_dir/icons
 map_file=$state_dir/pinned-icons.json
 lock_file=$state_dir/.lock
 max_source_size=$((20 * 1024 * 1024))
+max_icon_entries=1024
 lock_timeout=10
 private_applications=$HOME/.local/share/applications/omarchy-taskbar
 tmp_dir=""
@@ -72,12 +73,38 @@ hex_bytes() {
 }
 
 png_magic() {
-  local path=$1 size signature chunk
+  local path=$1 size signature offset=8 chunks=0 chunk_header length_hex length type next format
+  local saw_idat=false
   size=$(stat -c %s -- "$path") || return 1
-  ((size >= 24)) || return 1
+  ((size >= 45)) || return 1
   signature=$(hex_bytes "$path" 0 8) || return 1
-  chunk=$(hex_bytes "$path" 12 4) || return 1
-  [[ $signature == 89504e470d0a1a0a && $chunk == 49484452 ]]
+  [[ $signature == 89504e470d0a1a0a ]] || return 1
+  while ((offset + 12 <= size && chunks < 4096)); do
+    chunk_header=$(hex_bytes "$path" "$offset" 8) || return 1
+    [[ $chunk_header =~ ^[0-9a-f]{16}$ ]] || return 1
+    length_hex=${chunk_header:0:8}
+    type=${chunk_header:8:8}
+    length=$((16#$length_hex))
+    next=$((offset + 12 + length))
+    ((next <= size)) || return 1
+    if ((chunks == 0)); then
+      [[ $length == 13 && $type == 49484452 ]] || return 1
+      format=$(hex_bytes "$path" 24 5) || return 1
+      case $format in
+        010000000[01]|020000000[01]|040000000[01]|080000000[01]|100000000[01]|080200000[01]|100200000[01]|010300000[01]|020300000[01]|040300000[01]|080300000[01]|080400000[01]|100400000[01]|080600000[01]|100600000[01]) ;;
+        *) return 1 ;;
+      esac
+    elif [[ $type == 49444154 ]]; then
+      saw_idat=true
+    elif [[ $type == 49454e44 ]]; then
+      [[ $length == 0 && $saw_idat == true && $next == "$size" ]] || return 1
+      [[ $(hex_bytes "$path" "$((offset + 8))" 4) == ae426082 ]]
+      return
+    fi
+    offset=$next
+    chunks=$((chunks + 1))
+  done
+  return 1
 }
 
 valid_png_dimensions() {
@@ -128,13 +155,53 @@ normalize_svg() {
 }
 
 safe_svg() {
-  local path=$1 normalized=$tmp_dir/normalized.svg
-  normalize_svg "$path" "$normalized" || return 1
+  local LC_ALL=C path=$1 validated=$tmp_dir/validated.svg without_nul=$tmp_dir/without-nul.svg
+  local normalized=$tmp_dir/normalized.svg markers_file=$tmp_dir/encoding-markers
+  local assignments_file=$tmp_dir/encoding-assignments
+  local prefix original_size clean_size declaration assignment value grep_status
+  local -a encoding_markers=() encoding_assignments=()
+  prefix=$(hex_bytes "$path" 0 4) || return 1
+  case $prefix in
+    efbbbf*|fffe*|feff*|0000feff|2b2f76??|f7644c*|dd736673|0efeff*|fbee28*|84319533)
+      return 1
+      ;;
+  esac
+  command -v iconv >/dev/null || return 1
+  iconv -f UTF-8 -t UTF-8 -- "$path" > "$validated" || return 1
+  tr -d '\000' < "$validated" > "$without_nul" || return 1
+  original_size=$(stat -c %s -- "$validated") || return 1
+  clean_size=$(stat -c %s -- "$without_nul") || return 1
+  ((original_size == clean_size)) || return 1
+  normalize_svg "$validated" "$normalized" || return 1
+  declaration=$(grep -aEio -m 1 '^[[:space:]]*<\?xml([[:space:]][^?]*)?\?>' -- "$normalized")
+  grep_status=$?
+  ((grep_status <= 1)) || return 1
+  grep -aEio 'encoding[[:space:]]*=' <<< "$declaration" > "$markers_file"
+  grep_status=$?
+  ((grep_status <= 1)) || return 1
+  mapfile -t encoding_markers < "$markers_file"
+  if ((${#encoding_markers[@]} > 0)); then
+    grep -aEio "encoding[[:space:]]*=[[:space:]]*(\"[^\"]*\"|'[^']*'|[^[:space:]?>]+)" \
+      <<< "$declaration" > "$assignments_file"
+    grep_status=$?
+    ((grep_status <= 1)) || return 1
+    mapfile -t encoding_assignments < "$assignments_file"
+  fi
+  ((${#encoding_markers[@]} == ${#encoding_assignments[@]})) || return 1
+  for assignment in "${encoding_assignments[@]}"; do
+    value=${assignment#*=}
+    value=${value//[[:space:]]/}
+    if [[ $value == \"*\" || $value == \'*\' ]]; then
+      value=${value:1:${#value}-2}
+    fi
+    value=${value,,}
+    [[ $value == utf-8 || $value == us-ascii ]] || return 1
+  done
   looks_like_svg "$normalized" || return 1
   svg_pattern_absent -aEiq \
     '<[^[:space:]/>]*:?(script|foreignobject)([[:space:]/>])' -- "$normalized" || return 1
   svg_pattern_absent -aEiq \
-    '<!(doctype|entity)|<\?xml-stylesheet|<style([[:space:]>])|style[[:space:]]*=|on[a-z]+[[:space:]]*=|url[[:space:]]*\(' \
+    '<!(doctype|entity)|<\?xml-stylesheet|<[^[:space:]/>]*:?style([[:space:]>])|style[[:space:]]*=|on[a-z]+[[:space:]]*=|url[[:space:]]*\(' \
     -- "$normalized" || return 1
   svg_pattern_absent -aEiq \
     "(^|[^[:alnum:]_.-])([[:alnum:]_.-]+:)?href[[:space:]]*=[[:space:]]*[\"'][[:space:]]*[^#[:space:]]" \
@@ -150,7 +217,8 @@ svg_pattern_absent() {
 
 run_limited() (
   ulimit -f 40960
-  timeout 5 "$@"
+  ulimit -v 524288
+  timeout -k 2 5 "$@"
 )
 
 candidate_error=extract
@@ -209,7 +277,7 @@ rasterize_svg() {
   safe_svg "$source" || return 3
   command -v timeout >/dev/null && command -v rsvg-convert >/dev/null || return 2
   run_limited rsvg-convert --keep-aspect-ratio --width 1024 --height 1024 \
-    -o "$output" "$source" >/dev/null || return 1
+    -o "$output" "$tmp_dir/validated.svg" >/dev/null || return 1
 }
 
 map_json='{}'
@@ -224,7 +292,8 @@ read_map() {
   [[ -f $map_file && -O $map_file ]] || return 1
   size=$(stat -c %s -- "$map_file") || return 1
   ((size <= 20 * 1024 * 1024)) || return 1
-  map_json=$(jq -ce 'if type == "object" and all(.[]; type == "string") then . else error("map") end' \
+  map_json=$(jq -ce --argjson max "$max_icon_entries" \
+    'if type == "object" and length <= $max and all(.[]; type == "string") then . else error("map") end' \
     -- "$map_file") || return 1
   chmod 600 -- "$map_file"
 }
@@ -337,7 +406,8 @@ set_icon() {
   cp --no-dereference -- "$output" "$new_icon" || fail storage
   chmod 600 -- "$new_icon" || fail storage
   new_name=${new_icon##*/}
-  new_json=$(jq -c --arg key "$key" --arg value "$new_name" '.[$key] = $value' \
+  new_json=$(jq -c --arg key "$key" --arg value "$new_name" --argjson max "$max_icon_entries" \
+    'if has($key) or length < $max then .[$key] = $value else error("map") end' \
     <<< "$map_json") || fail map
   write_map "$new_json" || fail map
 

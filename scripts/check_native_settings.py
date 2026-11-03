@@ -12,6 +12,7 @@ source = (ROOT / "Taskbar.qml").read_text()
 functions = "\n".join(re.search(r"  function " + name + r"\([^\n]*\) \{.*?\n  \}", source, re.S).group(0)
                       for name in ("saveConfig", "writeNextConfig"))
 scale = re.search(r"  function scaleFor\([^\n]*\) \{[^\n]*\}", source).group(0)
+newdict = re.search(r"  function newDictionary\([^\n]*\) \{[^\n]*\}", source).group(0)
 writer = re.search(r"  Process \{\n    id: configWriter\b.*?\n  \}", source, re.S).group(0)
 with tempfile.TemporaryDirectory(prefix="taskbar-native-settings-") as directory:
     base = Path(directory)
@@ -65,7 +66,7 @@ WRITER
 }
 '''
     (base / "shell.qml").write_text(harness.replace("CONFIG_PATH", json.dumps(str(config)))
-                                  .replace("FUNCTIONS", functions + "\n" + scale).replace("WRITER", writer))
+                                  .replace("FUNCTIONS", functions + "\n" + scale + "\n" + newdict).replace("WRITER", writer))
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", XDG_RUNTIME_DIR=str(base / "runtime"),
                DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(base / "no-bus"))
     result = subprocess.run(["quickshell", "--no-color", "-p", str(base)],

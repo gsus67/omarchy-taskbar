@@ -43,10 +43,13 @@ class FilePinTest(unittest.TestCase):
                         XDG_DATA_HOME=str(self.home / ".local/share"),
                         XDG_DATA_DIRS=str(self.base / "system"), TMPDIR=str(self.base))
 
-    def run_script(self, operation, value, known=()):
+    def run_script(self, operation, value, known=(), umask=None):
         third = str(known) if operation == "icon" else json.dumps(known)
-        result = subprocess.run([BASH, str(SCRIPT), operation,  # noqa: S603
-                                 str(value), third], env=self.env,
+        command = [BASH, str(SCRIPT), operation, str(value), third]
+        if umask is not None:
+            command = [BASH, "-c", 'umask "$1"; shift; exec "$@"',
+                       "pin-file-test", umask, *command]
+        result = subprocess.run(command, env=self.env,  # noqa: S603
                                 cwd=self.base, text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
@@ -72,10 +75,26 @@ class FilePinTest(unittest.TestCase):
                          + chunk(b"IDAT", pixels) + chunk(b"IEND", b""))
         return path
 
+    def pe(self, name="Game.exe"):
+        data = bytearray(128)
+        data[:2] = b"MZ"
+        data[0x3C:0x40] = struct.pack("<I", 0x40)
+        data[0x40:0x44] = b"PE\0\0"
+        path = self.base / name
+        path.write_bytes(data)
+        return path
+
     def install_slow_jq(self):
         (self.bin / "jq").unlink()
         self.file("jq", f'#!/bin/bash\n{shlex.quote(shutil.which("sleep"))} 0.05\n'
                   f'exec {shlex.quote(shutil.which("jq"))} "$@"\n',
+                  executable=True, parent=self.bin)
+
+    def install_icon_tools(self, fixture):
+        self.env["TOOL_PNG"] = str(fixture)
+        self.file("wrestool", '#!/bin/bash\nprintf "\\x00\\x00\\x01\\x00\\x01\\x00" > "$5/group.ico"\n',
+                  executable=True, parent=self.bin)
+        self.file("icotool", '#!/bin/bash\ncp -- "$TOOL_PNG" "$3/icon.png"\n',
                   executable=True, parent=self.bin)
 
     def run_parallel(self, operations):
@@ -544,17 +563,58 @@ class FilePinTest(unittest.TestCase):
 
     def test_optional_icon_extraction_and_cleanup(self):
         # Stand-ins exercise the optional tools without requiring icoutils.
-        self.file("wrestool", '#!/bin/bash\nprintf ico > "$5/group.ico"\n',
-                  executable=True, parent=self.bin)
-        self.file("icotool", '#!/bin/bash\nprintf png > "$3/icon.png"\n',
-                  executable=True, parent=self.bin)
-        key = self.run_script("add", self.file("Game.exe"))
+        fixture = self.png()
+        self.install_icon_tools(fixture)
+        key = self.run_script("add", self.pe(), umask="000")
         self.assertIn(f"Icon={key}\n", self.entry(key).read_text())
-        self.assertEqual((self.icons / (key + ".png")).read_text(), "png")
+        self.assertEqual((self.icons / (key + ".png")).read_bytes(), fixture.read_bytes())
+        self.assertEqual(self.icons.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.icons / (key + ".png")).stat().st_mode & 0o777, 0o600)
         self.run_script("remove", key)
         self.assertFalse(self.entry(key).exists())
         self.assertFalse((self.icons / (key + ".png")).exists())
         self.assertFalse(list(self.base.glob("tmp.*")))
+
+    def test_extracted_exe_icon_is_not_registered_as_custom(self):
+        fixture = self.png()
+        self.install_icon_tools(fixture)
+        key = self.run_script("add", self.pe())
+        self.assertTrue((self.icons / (key + ".png")).is_file())
+        self.assertFalse(self.icon_map.exists())
+
+    def test_extracted_exe_icon_preserves_shared_directory_permissions(self):
+        fixture = self.png()
+        self.install_icon_tools(fixture)
+        self.icons.mkdir(parents=True)
+        self.icons.chmod(0o755)
+        key = self.run_script("add", self.pe())
+        self.assertTrue((self.icons / (key + ".png")).is_file())
+        self.assertEqual(self.icons.stat().st_mode & 0o777, 0o755)
+
+    def test_icon_extraction_rejects_invalid_pe_and_invalid_png_and_uses_kill_timeout(self):
+        ran = self.base / "wrestool-ran"
+        timeout_args = self.base / "timeout-args"
+        self.env.update(WRESTOOL_RAN=str(ran), TIMEOUT_ARGS=str(timeout_args))
+        real_timeout = shlex.quote(shutil.which("timeout"))
+        (self.bin / "timeout").unlink()
+        self.file("timeout", '#!/bin/bash\nprintf "%s\\n" "$*" >> "$TIMEOUT_ARGS"\n'
+                  f'exec {real_timeout} "$@"\n', executable=True, parent=self.bin)
+        self.file("wrestool", '#!/bin/bash\n: > "$WRESTOOL_RAN"\nexit 1\n',
+                  executable=True, parent=self.bin)
+        self.file("icotool", "#!/bin/bash\nexit 1\n", executable=True, parent=self.bin)
+
+        invalid_key = self.run_script("add", self.file("Invalid.exe", "not a PE"))
+        self.assertIn("Icon=application-x-executable\n", self.entry(invalid_key).read_text())
+        self.assertFalse(ran.exists())
+
+        self.file("wrestool", '#!/bin/bash\nmkdir -p -- "$5"\nprintf "\\x00\\x00\\x01\\x00\\x01\\x00" > "$5/group.ico"\n',
+                  executable=True, parent=self.bin)
+        self.file("icotool", '#!/bin/bash\nmkdir -p -- "$3"\nprintf not-a-png > "$3/icon.png"\n',
+                  executable=True, parent=self.bin)
+        invalid_png_key = self.run_script("add", self.pe("BadIcon.exe"))
+        self.assertIn("Icon=application-x-executable\n", self.entry(invalid_png_key).read_text())
+        self.assertFalse((self.icons / (invalid_png_key + ".png")).exists())
+        self.assertRegex(timeout_args.read_text(), r"(?m)^-k [^ ]+ [^ ]+ (?:wrestool|icotool) ")
 
     def test_failed_icon_extraction_uses_generic_icon(self):
         for name in ("wrestool", "icotool"):

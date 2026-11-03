@@ -21,6 +21,14 @@
   `icotool`. Missing, timed-out or invalid converter output leaves the current
   icon unchanged.
 
+### Fixes
+
+- Hide the active Hyprland special workspace before focusing a taskbar window
+  outside it, while leaving the workspace open when its own window is chosen.
+  The scratchpad toggle is aimed at the target window's monitor, stale query
+  events cannot finish a newer request, and a hung `hyprctl` times out after
+  2 seconds and focuses the window without toggling the scratchpad.
+
 ## v0.2.0 — 2026-10-30
 
 - Add **Position** to the bar's menu: **Top**, **Right**, **Left**, **Bottom**

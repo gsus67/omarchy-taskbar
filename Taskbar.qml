@@ -711,8 +711,8 @@ Item {
     var current = -1
     for (var i = 0; i < windows.length; i++)
       if (windows[i].activated) current = i
-    if (current === -1) windows[0].activate()
-    else if (windows.length > 1) windows[(current + 1) % windows.length].activate()
+    if (current === -1) focusWindow(windows[0])
+    else if (windows.length > 1) focusWindow(windows[(current + 1) % windows.length])
   }
 
   // Hyprland's view of a window: its workspace and address.
@@ -727,15 +727,196 @@ Item {
     return hypr && hypr.workspace ? String(hypr.workspace.name) : ""
   }
 
-  // Jumps to one window, switching to its workspace. The address comes from
+  function specialWorkspaceForMonitor(monitors, targetMonitor) {
+    if (!Array.isArray(monitors)) return ""
+    var monitor = null
+    if (targetMonitor !== "")
+      for (var i = 0; i < monitors.length; i++)
+        if (String(monitors[i].name || "") === targetMonitor) monitor = monitors[i]
+    if (!monitor)
+      for (var j = 0; j < monitors.length; j++)
+        if (monitors[j].focused === true) monitor = monitors[j]
+    var special = monitor ? monitor.specialWorkspace : null
+    var name = special && Number(special.id) !== 0 ? String(special.name || "") : ""
+    return /^special:[A-Za-z0-9._-]+$/.test(name) ? name : ""
+  }
+
+  property var focusRequests: []
+  property var activeFocusRequest: null
+  property var activeFocusQuery: null
+  property int focusRequestSeq: 0
+  property int activeFocusRequestId: 0
+
+  function dispatchFocus(request, monitors) {
+    var special = root.specialWorkspaceForMonitor(monitors, request.monitor)
+    if (special !== "" && special !== request.workspace) {
+      // toggle_special acts on the focused monitor, so aim it at the
+      // target window's monitor first when that one is not focused.
+      var target = null
+      if (Array.isArray(monitors) && request.monitor !== "")
+        for (var i = 0; i < monitors.length; i++)
+          if (String(monitors[i].name || "") === request.monitor) target = monitors[i]
+      if (target && target.focused !== true
+          && /^[A-Za-z0-9._-]+$/.test(request.monitor))
+        Hyprland.dispatch('hl.dsp.focus({ monitor = "' + request.monitor + '" })')
+      Hyprland.dispatch('hl.dsp.workspace.toggle_special("' + special.slice(8) + '")')
+    }
+    Hyprland.dispatch('hl.dsp.focus({ window = "address:' + request.address + '" })')
+  }
+
+  function startNextFocus() {
+    if (root.activeFocusQuery !== null || root.activeFocusRequest !== null
+        || root.focusRequests.length === 0) return
+    root.activeFocusRequest = root.focusRequests[0]
+    root.focusRequests = root.focusRequests.slice(1)
+    root.focusRequestSeq = (root.focusRequestSeq || 0) + 1
+    root.activeFocusRequestId = root.focusRequestSeq
+    var query = null
+    if (typeof focusMonitorQueryComponent !== "undefined"
+        && focusMonitorQueryComponent)
+      query = focusMonitorQueryComponent.createObject(root, {
+        "requestId": root.focusRequestSeq
+      })
+    if (!query) {
+      root.finishFocus("", false)
+      return
+    }
+    root.activeFocusQuery = query
+    if (typeof focusQueryTimeout !== "undefined" && focusQueryTimeout) {
+      focusQueryTimeout.requestId = root.focusRequestSeq
+      focusQueryTimeout.restart()
+    }
+    query.running = true
+    // A start that failed synchronously never emits exited: release the
+    // request at once instead of waiting for the timeout.
+    if (!query.running && !query.hasExited
+        && root.activeFocusRequest !== null)
+      root.finishFocus("", false)
+  }
+
+  function finishFocus(monitorsJson, querySucceeded) {
+    var request = root.activeFocusRequest
+    if (request === null) return
+    if (typeof focusQueryTimeout !== "undefined" && focusQueryTimeout)
+      focusQueryTimeout.stop()
+    var query = root.activeFocusQuery
+    root.activeFocusQuery = null
+    if (query) {
+      query.running = false
+      if (typeof query.destroy === "function") query.destroy()
+    }
+    var monitors = []
+    if (querySucceeded) {
+      try {
+        var parsed = JSON.parse(monitorsJson)
+        if (Array.isArray(parsed)) monitors = parsed
+      } catch (e) {}
+    }
+    root.dispatchFocus(request, monitors)
+    root.activeFocusRequest = null
+    root.startNextFocus()
+  }
+
+  // Only the current request may finish, and only once exited and the
+  // collector have both delivered. runningChanged(false) can arrive
+  // before exited, and late events from a previous request must not
+  // finish the current one without its data.
+  function completeFocusQuery(requestId, query) {
+    var source = query === undefined ? root.activeFocusQuery : query
+    if (!source || source !== root.activeFocusQuery) return
+    var eventId = requestId === undefined ? source.requestId : requestId
+    if (root.activeFocusRequest !== null && eventId !== undefined
+        && eventId !== null && eventId !== 0 && root.activeFocusRequestId
+        && eventId !== root.activeFocusRequestId) return
+    if (root.activeFocusRequest !== null) {
+      if (source.hasExited && source.streamFinished)
+        root.finishFocus(source.output, source.querySucceeded)
+    }
+    if (root.activeFocusRequest === null
+        && (root.activeFocusQuery === null || !root.activeFocusQuery.running))
+      root.startNextFocus()
+  }
+
+  function timeoutFocusQuery(requestId) {
+    if (root.activeFocusRequest === null) return
+    var eventId = requestId === undefined
+      ? (typeof focusQueryTimeout !== "undefined" && focusQueryTimeout
+         ? focusQueryTimeout.requestId : 0)
+      : requestId
+    if (eventId && root.activeFocusRequestId
+        && eventId !== root.activeFocusRequestId) return
+    if (typeof focusQueryTimeout !== "undefined" && focusQueryTimeout)
+      focusQueryTimeout.stop()
+    var query = root.activeFocusQuery
+    root.activeFocusQuery = null
+    if (query) {
+      query.running = false
+      if (typeof query.destroy === "function") query.destroy()
+    }
+    // Focus without toggling: the scratchpad state is unknown.
+    root.finishFocus("", false)
+  }
+
+  // Jumps to one window, switching to its workspace. A visible scratchpad is
+  // hidden first unless the target belongs to it. The address comes from
   // Hyprland and is checked to be hex before it goes into the dispatch.
   function focusWindow(toplevel) {
     var hypr = hyprlandOf(toplevel)
     var address = hypr ? String(hypr.address) : ""
     if (!/^0x/.test(address)) address = "0x" + address
-    if (/^0x[0-9a-fA-F]+$/.test(address))
-      Quickshell.execDetached(["hyprctl", "dispatch", 'hl.dsp.focus({ window = "address:' + address + '" })'])
-    else toplevel.activate()
+    if (!/^0x[0-9a-fA-F]+$/.test(address)) {
+      toplevel.activate()
+      return
+    }
+    var workspace = hypr && hypr.workspace ? String(hypr.workspace.name) : ""
+    var monitor = hypr && hypr.monitor ? String(hypr.monitor.name || "") : ""
+    root.focusRequests = root.focusRequests.concat([{
+      address: address,
+      workspace: workspace,
+      monitor: monitor
+    }])
+    root.startNextFocus()
+  }
+
+  // Query at click time: cached lastIpcObject data can be stale, and toggling
+  // from stale state would reopen a scratchpad that has already been hidden.
+  // One Process per request: handlers close over this instance and its
+  // captured requestId, so a killed process cannot complete a later request.
+  Component {
+    id: focusMonitorQueryComponent
+    Process {
+      id: focusQueryProcess
+      command: ["hyprctl", "monitors", "-j"]
+      property bool hasExited: false
+      property bool streamFinished: false
+      property bool querySucceeded: false
+      property int requestId: 0
+      property string output: ""
+      stdout: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          focusQueryProcess.output = text
+          focusQueryProcess.streamFinished = true
+          root.completeFocusQuery(focusQueryProcess.requestId, focusQueryProcess)
+        }
+      }
+      onExited: function(exitCode, exitStatus) {
+        hasExited = true
+        querySucceeded = exitCode === 0 && exitStatus === 0
+        root.completeFocusQuery(focusQueryProcess.requestId, focusQueryProcess)
+      }
+      onRunningChanged: root.completeFocusQuery(focusQueryProcess.requestId, focusQueryProcess)
+    }
+  }
+
+  // A hung hyprctl must not stall the click queue: on timeout, focus the
+  // window without toggling the scratchpad.
+  Timer {
+    id: focusQueryTimeout
+    interval: 2000
+    repeat: false
+    property int requestId: 0
+    onTriggered: root.timeoutFocusQuery(focusQueryTimeout.requestId)
   }
 
   function closeAll(app) {

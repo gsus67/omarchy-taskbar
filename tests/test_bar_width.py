@@ -41,8 +41,9 @@ class BarWidthTest(unittest.TestCase):
         self.assertIsNotNone(call, "missing literal bash -c script")
         self.assertRegex(writer[call.end():], r'^,\s*"omarchy-taskbar", configFile\.path,')
         script = list(scripts(writer))[0][1]
-        self.assertIn('mktemp -- "$1.XXXXXX"', script)
-        self.assertIn('>"$tmp" && mv -f -- "$tmp" "$1"', script)
+        self.assertIn('mkdir -p -m 700 -- "$dir"', script)
+        self.assertIn('mktemp -- "$dir/.config.XXXXXX"', script)
+        self.assertIn('chmod 600 -- "$tmp" && mv -fT -- "$tmp" "$1"', script)
         self.assertNotIn('>"$1"', script)
 
     def test_config_script_replaces_atomically_and_removes_empty_config(self):
@@ -53,13 +54,17 @@ class BarWidthTest(unittest.TestCase):
             data = json.dumps({"scale": 1.25, "width": "60%", "other": '$(touch injected) `touch injected` "quote"'})
 
             def run(value):
-                result = subprocess.run(["bash", "-c", script, "omarchy-taskbar", str(path), value],
+                command = ["bash", "-c", 'umask 000; exec "$@"', "config-writer",
+                           "bash", "-c", script, "omarchy-taskbar", str(path), value]
+                result = subprocess.run(command,
                                         cwd=directory, text=True, capture_output=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stderr, "")
 
             run(data)
             self.assertEqual(path.read_text(), data + "\n")
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             original_inode = path.stat().st_ino
             run('{"other": true}')
             self.assertNotEqual(path.stat().st_ino, original_inode)
@@ -72,12 +77,13 @@ class BarWidthTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed to run QML JavaScript")
     def test_rapid_setting_changes_are_serialized_and_preserve_other_keys(self):
-        functions = "\n".join(re.search(r"  function " + name + r"\([^\n]*\) \{.*?\n  \}", SOURCE, re.S).group(0)
-                              for name in ("saveConfig", "writeNextConfig"))
+        functions = re.search(r"  function newDictionary\([^\n]*\) \{[^\n]*\}", SOURCE).group(0) + "\n"
+        functions += "\n".join(re.search(r"  function " + name + r"\([^\n]*\) \{.*?\n  \}", SOURCE, re.S).group(0)
+                               for name in ("saveConfig", "writeNextConfig"))
         code = functions + "\n" + r'''
 const configFile={text:()=>JSON.stringify({other:"preserved"})};
 const configWriter={running:false,payload:""};
-const root={configSnapshot:null,configWrites:[],writeNextConfig,scaleFor:v=>[0.75,0.9,1,1.25,1.5,2].includes(v)?v:1};
+const root={configSnapshot:null,configWrites:[],writeNextConfig,newDictionary,scaleFor:v=>[0.75,0.9,1,1.25,1.5,2].includes(v)?v:1};
 saveConfig("style","crystal");
 saveConfig("width","10%");
 saveConfig("scale",0.75);

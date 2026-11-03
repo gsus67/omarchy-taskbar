@@ -40,7 +40,7 @@ class CustomIconsTest(unittest.TestCase):
             'readonly property string iconsDirectory: configHome + "/omarchy-taskbar/icons"',
             SOURCE,
         )
-        self.assertIn("property var customIcons: ({})", SOURCE)
+        self.assertIn("property var customIcons: Object.create(null)", SOURCE)
         loader = file_view("iconsFile")
         self.assertIn("path: root.iconsMapPath", loader)
         self.assertIn("watchChanges: true", loader)
@@ -53,12 +53,13 @@ class CustomIconsTest(unittest.TestCase):
         self.assertIn("JSON.parse(text())", loader)
         self.assertIn('typeof parsed === "object"', loader)
         self.assertIn("!Array.isArray(parsed)", loader)
+        self.assertIn("Object.keys(parsed).length <= root.maxCustomIcons", loader)
         self.assertIn('typeof value !== "string"', loader)
         self.assertRegex(loader, r"\^\[0-9a-f\]\{16\}-\[A-Za-z0-9\]\{6\}\\\.png\$")
         self.assertIn('var path = root.iconsDirectory + "/" + value', loader)
         self.assertIn('path.indexOf(root.iconsDirectory + "/") !== 0', loader)
-        self.assertGreaterEqual(loader.count("root.customIcons = ({})"), 2)
-        self.assertIn("onLoadFailed: root.customIcons = ({})", loader)
+        self.assertGreaterEqual(loader.count("root.customIcons = root.newDictionary()"), 2)
+        self.assertIn("onLoadFailed: root.customIcons = root.newDictionary()", loader)
 
     def test_custom_icon_precedes_existing_resolution_as_file_url(self):
         resolver = function("iconFor")

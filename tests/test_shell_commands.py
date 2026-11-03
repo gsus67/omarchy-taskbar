@@ -42,9 +42,9 @@ class ShellCommandTest(unittest.TestCase):
         )
         self.assertIsNotNone(command)
         self.assertIn('case "$1" in icon)', command.group(1))
-        self.assertIn('"$BASH" "$5" "$1" "$2" "$4"', command.group(1))
-        self.assertIn('unicon) "$BASH" "$5" "$1" "$2" ""', command.group(1))
-        self.assertIn('*) "$BASH" "$5" "$1" "$2" "$3"', command.group(1))
+        self.assertIn('timeout -k 2 30 "$BASH" "$5" "$1" "$2" "$4"', command.group(1))
+        self.assertIn('unicon) timeout -k 2 30 "$BASH" "$5" "$1" "$2" ""', command.group(1))
+        self.assertIn('*) timeout -k 2 30 "$BASH" "$5" "$1" "$2" "$3"', command.group(1))
         arguments = command.group(1).split('"omarchy-taskbar",', 1)[1]
         self.assertRegex(
             arguments,
@@ -56,6 +56,13 @@ class ShellCommandTest(unittest.TestCase):
             r'(?:["\'][^"\']*["\']\s*\+\s*(?:operation|value|applicationIds|path)\b|'
             r'(?:operation|value|applicationIds|path)\s*\+\s*["\'])',
         )
+
+    def test_pin_queue_process_has_a_hard_kill_timeout(self):
+        command = re.search(
+            r"id: pinChangeProc\b.*?command:\s*\[(.*?)\]\s*stdout:", SOURCE, re.S
+        )
+        self.assertIsNotNone(command)
+        self.assertIn('timeout -k 2 30 "$BASH" "$5"', command.group(1))
 
     def test_icon_errors_notify_with_an_argument_list_and_fixed_messages(self):
         notification = re.search(

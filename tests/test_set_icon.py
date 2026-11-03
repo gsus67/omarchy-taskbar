@@ -17,14 +17,16 @@ SCRIPT = ROOT / "bin/set-icon.sh"
 BASH = shutil.which("bash")
 
 
-def png_bytes(width=1, height=1):
+def png_bytes(width=1, height=1, idat_chunks=1):
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
 
     pixels = b"".join(b"\0" + (b"\0\0\0\xff" * width) for _ in range(height))
     header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(pixels)) + chunk(b"IEND", b"")
+    compressed = zlib.compress(pixels)
+    idat = chunk(b"IDAT", compressed) + chunk(b"IDAT", b"") * (idat_chunks - 1)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + idat + chunk(b"IEND", b"")
 
 
 class SetIconTest(unittest.TestCase):
@@ -40,8 +42,8 @@ class SetIconTest(unittest.TestCase):
         self.lock = self.state / ".lock"
         self.bin = self.base / "bin"
         self.bin.mkdir()
-        for name in ("bash", "chmod", "cp", "flock", "grep", "head", "jq", "ln", "mkdir",
-                     "mktemp", "mv", "od", "rm", "sha256sum", "stat", "timeout", "tr"):
+        for name in ("bash", "chmod", "cp", "flock", "grep", "head", "iconv", "jq", "ln",
+                     "mkdir", "mktemp", "mv", "od", "rm", "sha256sum", "stat", "timeout", "tr"):
             target = shutil.which(name)
             self.assertIsNotNone(target, name)
             (self.bin / name).symlink_to(target)
@@ -272,6 +274,23 @@ class SetIconTest(unittest.TestCase):
         self.assertEqual(self.run_script("set", "wide", too_wide), "error:dimensions")
         self.assertEqual(self.run_script("set", "tall", too_tall), "error:dimensions")
 
+    def test_png_requires_a_well_formed_header_and_terminal_iend(self):
+        valid = png_bytes()
+        hostile = {
+            "trailing.png": valid + b"untrusted trailing data",
+            "bad-ihdr-length.png": valid[:8] + b"\0\0\0\x0c" + valid[12:],
+            "missing-iend.png": valid[:-12],
+            "bad-format.png": valid[:24] + b"\x01\x06\0\0\0" + valid[29:],
+        }
+        for name, contents in hostile.items():
+            with self.subTest(name=name):
+                source = self.binary_file(name, contents)
+                self.assertEqual(self.run_script("set", name, source), "error:type")
+
+    def test_png_with_more_than_256_idat_chunks_is_accepted(self):
+        source = self.binary_file("many-idat.png", png_bytes(idat_chunks=300))
+        self.assertEqual(self.run_script("set", "many-idat", source), "ok")
+
     def test_ico_is_converted_and_converter_output_is_revalidated(self):
         ico = self.binary_file("icon.bin", b"\0\0\1\0\1\0" + b"x" * 32)
         self.install_icotool()
@@ -339,6 +358,7 @@ class SetIconTest(unittest.TestCase):
             b'<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg"/>',
             b'<?xml-stylesheet href="https://example.test/x"?><svg xmlns="http://www.w3.org/2000/svg"/>',
             b'<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(https://example.test/x)</style></svg>',
+            b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="urn:test"><s:style>rect{fill:blue}</s:style></svg>',
             b'<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://example.test/x)"/></svg>',
             b'<svg xmlns="http://www.w3.org/2000/svg"><image href=\n"file:///etc/passwd"/></svg>',
             b'<svg xmlns="http://www.w3.org/2000/svg"><script\n>alert(1)</script></svg>',
@@ -352,6 +372,44 @@ class SetIconTest(unittest.TestCase):
                 source = self.binary_file(f"hostile-{number}.svg", contents)
                 self.assertEqual(self.run_script("set", f"hostile-{number}", source), "error:svg")
                 self.assertFalse(called.exists())
+
+    def test_svg_rejects_ambiguous_or_non_utf8_byte_encodings_before_rendering(self):
+        self.install_rsvg()
+        safe = b'<svg xmlns="http://www.w3.org/2000/svg"><path/></svg>'
+        hostile = {
+            "utf7": (b'<?xml version="1.0" encoding="UTF-7"?>'
+                     b'<svg xmlns="http://www.w3.org/2000/svg">'
+                     b'+ADw-style+AD4-rect+AHs-fill:red+AH0-+ADw-/style+AD4-</svg>'),
+            "utf16-bom": (b'<!-- <svg -->' +
+                           '<svg xmlns="http://www.w3.org/2000/svg"><style>rect{fill:red}</style></svg>'.encode("utf-16")),
+            "utf8-bom": b"\xef\xbb\xbf" + safe,
+            "nul": safe.replace(b"<path/>", b"<path\x00/>"),
+            "invalid-utf8": safe.replace(b"<path/>", b"<path id=\"\xff\"/>"),
+            "other-declaration": b'<?xml version="1.0" encoding="ISO-8859-1"?>' + safe,
+        }
+        for name, contents in hostile.items():
+            with self.subTest(name=name):
+                called = Path(self.env["RENDER_CALLED"])
+                called.unlink(missing_ok=True)
+                source = self.binary_file(name + ".svg", contents)
+                self.assertEqual(self.run_script("set", name, source), "error:svg")
+                self.assertFalse(called.exists())
+
+        for name, declaration in (("utf8", "UTF-8"), ("ascii", "us-ascii")):
+            with self.subTest(name=name):
+                source = self.binary_file(
+                    name + ".svg",
+                    f'<?xml version="1.0" encoding="{declaration}"?>'.encode() + safe,
+                )
+                self.assertEqual(self.run_script("set", name, source), "ok")
+
+    def test_svg_ignores_encoding_text_outside_xml_declaration(self):
+        self.install_rsvg()
+        source = self.binary_file(
+            "encoding-text.svg",
+            b'<svg xmlns="http://www.w3.org/2000/svg"><desc>encoding=base64</desc></svg>',
+        )
+        self.assertEqual(self.run_script("set", "encoding-text", source), "ok")
 
     def test_svg_with_attributes_after_root_line_break_is_rasterized(self):
         self.install_rsvg()
@@ -380,7 +438,7 @@ class SetIconTest(unittest.TestCase):
         real_grep = shlex.quote(shutil.which("grep"))
         self.tool("grep", 'count=0\n[[ ! -f $GREP_COUNTER ]] || read -r count < "$GREP_COUNTER"\n'
                   'count=$((count + 1))\nprintf "%s\\n" "$count" > "$GREP_COUNTER"\n'
-                  'if ((count == 2)); then exit 2; fi\n'
+                  'if ((count == 3)); then exit 2; fi\n'
                   f'exec {real_grep} "$@"\n')
         self.assertEqual(self.run_script("set", "filter-error", source), "error:svg")
         self.assertFalse(Path(self.env["RENDER_CALLED"]).exists())
@@ -418,6 +476,18 @@ class SetIconTest(unittest.TestCase):
         self.assertEqual(self.run_script("set", "busy", source), "error:busy")
         self.assertTrue(lock_arguments.read_text().startswith("-x -w 10 "))
 
+    def test_external_converters_have_kill_timeout_and_memory_limit(self):
+        source = self.binary_file("limited.svg", b'<svg xmlns="http://www.w3.org/2000/svg"/>')
+        limit = self.base / "vm-limit"
+        self.env.update(VM_LIMIT=str(limit), TOOL_PNG=str(self.png_fixture))
+        self.tool("timeout", '[[ $1 == -k && $2 == 2 && $3 == 5 ]] || exit 125\n'
+                  'shift 3\nexec "$@"\n')
+        self.tool("rsvg-convert", 'ulimit -v > "$VM_LIMIT"\nout=""\n'
+                  'while (($#)); do if [[ $1 == -o ]]; then out=$2; shift 2; else shift; fi; done\n'
+                  'cp -- "$TOOL_PNG" "$out"\n')
+        self.assertEqual(self.run_script("set", "limited.svg", source), "ok")
+        self.assertEqual(int(limit.read_text()), 524288)
+
     def test_svg_without_renderer_and_converter_calls_without_timeout_are_rejected(self):
         svg = self.binary_file("safe.svg", b'<svg xmlns="http://www.w3.org/2000/svg"/>')
         self.assertEqual(self.run_script("set", "safe.svg", svg), "error:tool")
@@ -426,7 +496,7 @@ class SetIconTest(unittest.TestCase):
         ran = self.base / "converter-ran"
         self.env["CONVERTER_RAN"] = str(ran)
         self.tool("icotool", ': > "$CONVERTER_RAN"\n')
-        self.tool("timeout", 'if [[ $2 == head ]]; then shift; exec "$@"; fi\nexit 124\n')
+        self.tool("timeout", 'if [[ $4 == head ]]; then shift 3; exec "$@"; fi\nexit 124\n')
         self.assertEqual(self.run_script("set", "timed.ico", ico), "error:extract")
         self.assertFalse(ran.exists())
 
@@ -462,6 +532,15 @@ class SetIconTest(unittest.TestCase):
         self.assertEqual(self.run_script("reset", "app"), "ok")
         self.assertEqual(victim.read_text(), "keep")
         self.assertEqual(self.map_data(), {})
+
+    def test_icon_map_rejects_entries_beyond_its_fixed_quota(self):
+        source = self.binary_file("quota.png", png_bytes())
+        self.state.mkdir(parents=True, mode=0o700)
+        entries = {f"app-{index}": f"{'0' * 16}-AAAAAA.png" for index in range(1024)}
+        self.map.write_text(json.dumps(entries))
+        self.map.chmod(0o600)
+        self.assertEqual(self.run_script("set", "one-too-many", source), "error:map")
+        self.assertEqual(json.loads(self.map.read_text()), entries)
 
     def test_failed_atomic_map_replace_removes_new_icon_and_temporaries(self):
         source = self.binary_file("source.png", png_bytes())

@@ -2,12 +2,15 @@
 
 ## Unreleased
 
+## v1.0.0 — 2026-11-02
+
 ### Appearance
 
+- Length menu: new **Auto** option that fits the bar to its icons.
 - Add **Change icon…** to the right-click menu of pinned apps for PNG, SVG, ICO
   and EXE files, plus **Restore icon** whenever a custom icon is active.
 - Store custom icons as private PNG files and reload their map immediately so
-  every taskbar reflects changes without a restart.
+  every taskbar reflects changes without a restart (#33).
 
 ### Security
 
@@ -20,6 +23,8 @@
   ICO uses `icotool`, and EXE extraction is available with `wrestool` and
   `icotool`. Missing, timed-out or invalid converter output leaves the current
   icon unchanged.
+- Validate the icon of a dropped EXE through `set-icon.sh` before pinning it,
+  and create launchers with `umask 077` in a `0700` launcher folder (#34).
 
 ### Fixes
 
@@ -27,7 +32,7 @@
   outside it, while leaving the workspace open when its own window is chosen.
   The scratchpad toggle is aimed at the target window's monitor, stale query
   events cannot finish a newer request, and a hung `hyprctl` times out after
-  2 seconds and focuses the window without toggling the scratchpad.
+  2 seconds and focuses the window without toggling the scratchpad (#32).
 
 ## v0.2.0 — 2026-10-30
 

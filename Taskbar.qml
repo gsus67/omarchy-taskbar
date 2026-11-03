@@ -146,6 +146,7 @@ Item {
   function widthFor(value, screenWidth, barSize, crystal, contentWidth) {
     var maximum = Math.max(1, screenWidth - (crystal ? Math.round(barSize * 0.8) : 0))
     var minimum = Math.min(maximum, Math.max(barSize * 2, contentWidth || 0))
+    if (value === "auto") return minimum
     var width = typeof value === "number" ? value : NaN
     if (typeof value === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$/.test(value.trim()))
       width = maximum * (parseFloat(value) / 100)
@@ -175,7 +176,7 @@ Item {
       return { label: length === 100 ? t("Full", "Completo") : length + "%",
         key: "width", value: length === 100 ? null : length + "%",
         checked: length === 100 ? configuredWidth === null || configuredWidth === "100%" : configuredWidth === length + "%" }
-    }))
+    }).concat([{ label: t("Auto", "Auto"), key: "width", value: "auto", checked: configuredWidth === "auto" }]))
     var items = [{ label: t("Style", "Estilo") + "  ›", page: "style" },
       { label: t("Position", "Posición") + "  ›", page: "position" }]
     // Combine follows Omarchy's bar: no size of its own to choose.
@@ -188,7 +189,7 @@ Item {
     if (key === "style" && value !== null && value !== "crystal") return
     if (key === "position" && value !== null && root.positionFor(value) !== value) return
     if (key === "scale" && value !== null && root.scaleFor(value) !== value) return
-    if (key === "width" && value !== null && ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"].indexOf(value) === -1) return
+    if (key === "width" && value !== null && ["auto", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"].indexOf(value) === -1) return
     var config = root.newDictionary()
     try {
       var parsed = root.configSnapshot === null ? JSON.parse(configFile.text()) : root.configSnapshot

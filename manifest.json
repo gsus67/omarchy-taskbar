@@ -14,5 +14,6 @@
   "entryPoints": {
     "panel": "Taskbar.qml",
     "barWidget": "BarWidget.qml"
-  }
+  },
+  "repository": "https://github.com/gsus67/omarchy-taskbar"
 }

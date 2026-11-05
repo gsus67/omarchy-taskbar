@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.1 — 2026-11-05
+
 ### Fixes
 
 - Stop the Combine module from shrinking 4 px per second when its section has no

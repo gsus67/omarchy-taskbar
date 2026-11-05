@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixes
+
+- Stop the Combine module from shrinking 4 px per second when its section has no
+  free room. It now shrinks only when it really overlaps a neighbour.
+- Stop the Combine module from collapsing to one icon on Omarchy 4.5. It now
+  measures its room from the bar's slot, not from the widget host inside it.
+- Keep the Combine module in place when dropped in the new Omarchy 4.5 bar
+  sections (centerBegin, centerEnd, tray).
+
 ## v1.0.0 — 2026-11-02
 
 ### Appearance

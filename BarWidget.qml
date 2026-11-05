@@ -18,9 +18,10 @@ Item {
   implicitWidth: content.item ? content.item.implicitWidth : 0
   implicitHeight: content.item ? content.item.implicitHeight : 0
 
-  // The bar's own drag area sits above its modules and would take every left
-  // press. Above it, icons keep theirs; the margin has no left-button handler,
-  // so a press there still reaches the bar, which moves the whole module.
+  // Older bars stack their drag area beside the widget parent, so raising it
+  // keeps the icons left press. Omarchy 4.5 loads the widget inside a Loader
+  // and its drag area covers the whole module: this has no effect there, and a
+  // left press anywhere on the module drags it.
   Component.onCompleted: if (parent) parent.z = 1
 
   Loader {

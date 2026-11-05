@@ -91,6 +91,8 @@ saveConfig("style",null);
 saveConfig("__proto__",{});
 saveConfig("width","auto");
 saveConfig("width","$(touch injected)");
+saveConfig("width","AUTO");
+saveConfig("width"," auto");
 const writes=[];
 while(configWriter.running) {
   writes.push(JSON.parse(configWriter.payload));
@@ -104,6 +106,21 @@ console.log(JSON.stringify(writes));
         self.assertEqual(len(writes), 5)
         self.assertEqual(writes[-1], {"other":"preserved", "width":"auto", "scale":0.75})
         self.assertEqual(writes[1], {"other":"preserved", "style":"crystal", "width":"10%"})
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to run QML JavaScript")
+    def test_auto_width_is_saved(self):
+        functions = re.search(r"  function newDictionary\([^\n]*\) \{[^\n]*\}", SOURCE).group(0) + "\n"
+        functions += "\n".join(re.search(r"  function " + name + r"\([^\n]*\) \{.*?\n  \}", SOURCE, re.S).group(0)
+                               for name in ("saveConfig", "writeNextConfig"))
+        code = functions + "\n" + r'''
+const configFile={text:()=>"{}"};
+const configWriter={running:false,payload:""};
+const root={configSnapshot:null,configWrites:[],writeNextConfig,newDictionary,scaleFor:v=>v};
+saveConfig("width","auto");
+console.log(configWriter.payload);
+'''
+        result = subprocess.run(["node", "-e", code], text=True, capture_output=True, timeout=5, check=True)
+        self.assertEqual(json.loads(result.stdout), {"width": "auto"})
 
     def test_empty_space_menu_dismissal_and_keyboard(self):
         mouse = SOURCE[SOURCE.index("// Empty bar space:"):SOURCE.index("id: appViewport")]
@@ -173,11 +190,14 @@ console.log(JSON.stringify(writes));
         lengths = self.evaluate('barMenuItems("length")', width="20%")
         self.assertEqual([row["value"] for row in lengths[1:]], [None, "90%", "80%", "70%", "60%", "50%", "40%", "30%", "20%", "10%", "auto"])
         self.assertTrue(lengths[-3]["checked"])
+        self.assertFalse(lengths[-1]["checked"])
         self.assertTrue(self.evaluate('barMenuItems("length")', width="10%")[-2]["checked"])
         auto = self.evaluate('barMenuItems("length")', width="auto")
         self.assertEqual(auto[-1]["label"], "Auto")
         self.assertEqual([row["checked"] for row in auto[1:]].count(True), 1)
         self.assertTrue(auto[-1]["checked"])
+        auto_spanish = self.evaluate('barMenuItems("length")', width="auto", spanish=True)
+        self.assertEqual([row["label"] for row in auto_spanish if row.get("checked")], ["Auto"])
 
     def test_scale_multiplies_bar_height_and_icons(self):
         self.assertIn("readonly property int barSize: Math.round(Style.bar.sizeHorizontal * (combined ? 1 : configuredScale))", SOURCE)
@@ -212,6 +232,22 @@ console.log(JSON.stringify(writes));
         self.assertIn("appRow.implicitWidth", SOURCE)
         self.assertIn("modelData.height - barWindow.height - barWindow.margins.bottom", SOURCE)
         self.assertIn("appViewport.contentX", SOURCE)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to run QML JavaScript")
+    def test_auto_width_follows_the_icons_up_to_the_screen(self):
+        result = self.evaluate('[widthFor("auto", 1000, 40, false, 200), '
+            'widthFor("auto", 1000, 40, false, 200.5), '
+            'widthFor("auto", 1000, 40, false, 30), '
+            'widthFor("auto", 1000, 40, false, 0), '
+            'widthFor("auto", 1000, 40, false, 5000), '
+            'widthFor("auto", 1000, 40, true, 5000), '
+            'widthFor("auto", 50, 40, true, 100)]')
+        self.assertEqual(result, [200, 201, 80, 80, 1000, 968, 18])
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to run QML JavaScript")
+    def test_other_spellings_of_auto_keep_the_full_length_fallback(self):
+        result = self.evaluate('["AUTO", " auto", "auto%", "autox", true, {}].map(value => widthFor(value, 1000, 40, false, 200))')
+        self.assertEqual(result, [1000] * 6)
 
 
 if __name__ == "__main__":

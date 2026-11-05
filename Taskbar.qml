@@ -146,7 +146,7 @@ Item {
   function widthFor(value, screenWidth, barSize, crystal, contentWidth) {
     var maximum = Math.max(1, screenWidth - (crystal ? Math.round(barSize * 0.8) : 0))
     var minimum = Math.min(maximum, Math.max(barSize * 2, contentWidth || 0))
-    if (value === "auto") return minimum
+    if (value === "auto") return Math.ceil(minimum)
     var width = typeof value === "number" ? value : NaN
     if (typeof value === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)%$/.test(value.trim()))
       width = maximum * (parseFloat(value) / 100)
@@ -1217,7 +1217,7 @@ Item {
 
   function layoutHas(layout) {
     if (!layout || typeof layout !== "object") return false
-    return ["left", "center", "right"].some(function(section) {
+    return Object.keys(layout).some(function(section) {
       return Array.isArray(layout[section]) && layout[section].some(function(entry) {
         return (entry && entry.id ? entry.id : entry) === root.pluginId
       })
@@ -1256,9 +1256,19 @@ Item {
     return found
   }
 
+  // The slot holding an item. Omarchy 4.5 wraps modules in a host that also has
+  // activeItem, so only an ancestor with region too is the slot.
+  function slotOf(item) {
+    while (item && !("activeItem" in item && "region" in item)) item = item.parent
+    return item || null
+  }
+
   // Room left along the bar before the module's section touches the next one.
-  // Modules of its own section just move along. A center section can grow to
-  // either side, so it uses the tighter one.
+  // Modules of its own section just move along. centerBegin and centerEnd hang
+  // off the center section and grow away from it, like left and right grow away
+  // from their bar end, so only the side they grow towards counts. A center
+  // section can grow to either side, so it uses the tighter one. Negative when
+  // sections overlap.
   function freeLength(own, slots, barLength) {
     var first = own.start
     var last = own.end
@@ -1271,10 +1281,17 @@ Item {
       } else if (slot.start < own.start) before = Math.max(before, slot.end)
       else after = Math.min(after, slot.start)
     })
-    var free = own.region === "left" ? after - last
-      : own.region === "right" ? first - before
+    return own.region === "left" || own.region === "centerEnd" ? after - last
+      : own.region === "right" || own.region === "centerBegin" ? first - before
       : Math.min(first - before, after - last)
-    return Math.max(0, free)
+  }
+
+  // Next limit for a module of the current length. Repeating it must not move
+  // the limit: the margin comes out of the free room only, a gap within the
+  // margin holds, and only a real overlap shrinks the module.
+  function moduleMaxLength(current, free, margin, minimum) {
+    var change = free < 0 ? free : Math.max(0, free - margin)
+    return Math.max(minimum, current + change)
   }
 
   // What BarWidget.qml shows: the same buttons, menus and drag as the bar above,
@@ -1301,8 +1318,7 @@ Item {
 
       function updateMaxLength() {
         if (!surface || !surface.contentItem) return
-        var slot = module
-        while (slot && !("activeItem" in slot)) slot = slot.parent
+        var slot = root.slotOf(module)
         if (!slot) return
         function along(item) {
           var point = item.mapToItem(null, 0, 0)
@@ -1311,7 +1327,7 @@ Item {
         }
         var own = along(slot)
         var free = root.freeLength(own, root.barSlots(surface.contentItem, []).map(along), vertical ? surface.height : surface.width)
-        maxLength = Math.max(root.barSize, own.end - own.start + free - Style.space(4))
+        maxLength = root.moduleMaxLength(length, free, Style.space(4), root.barSize)
       }
 
       // Neighbours change size on their own (clock, tray), with no signal here.

@@ -950,6 +950,9 @@ Item {
     var found = root.fallbacks[app.lookup]
     // A pinned program path: its file name ("/usr/bin/foot" → "foot").
     var own = app.appId !== "" ? app.appId.toLowerCase() : String(app.exe || "").split("/").pop()
+    // The app ID is chosen by the window's client: only ever a themed icon
+    // name, never a path or URL (file://, image://, "/…") to load.
+    if (!/^[a-z0-9][a-z0-9._+-]*$/.test(own)) own = ""
     var name = app.entry && app.entry.icon ? app.entry.icon : (found && found.icon) || own
     if (!app.entry && app.lookup !== "") Qt.callLater(root.lookupIcon, app.lookup)
     return root.iconSource(name)
